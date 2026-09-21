@@ -545,6 +545,22 @@ extension StatusItemController: StatusItemMenuPersistentActionDelegate {
             let result = await self.codexAccountPromotionCoordinator.promote(managedAccountID: managedAccountID)
             if case let .failure(error) = result {
                 self.presentLoginAlert(title: error.title, message: error.message)
+                return
+            }
+            guard self.settings.remoteAccountSyncEnabled,
+                  let account = self.settings.managedCodexAccount(id: managedAccountID)
+            else {
+                return
+            }
+            let syncResults = await self.settings.synchronizeRemoteAccount(
+                .codex(email: account.email, workspaceAccountID: account.effectiveWorkspaceAccountID))
+            let failedHosts = syncResults.filter { !$0.succeeded }.map(\.host)
+            if !failedHosts.isEmpty {
+                self.presentLoginAlert(
+                    title: L("Remote account sync failed"),
+                    message: String(
+                        format: L("Remote account sync failed on: %@"),
+                        failedHosts.joined(separator: ", ")))
             }
         }
     }

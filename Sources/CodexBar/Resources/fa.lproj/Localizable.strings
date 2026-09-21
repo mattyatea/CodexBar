@@ -1626,3 +1626,10 @@
 "antigravity_cost_estimate_hint" = "مصرف محلی × قیمت‌های عمومی API · هزینه یا اعتبار Antigravity نیست";
 "antigravity_quota_window_note" = "هزینهٔ بازه همهٔ مدل‌ها را دربر می‌گیرد · بازهٔ نمایش‌داده‌شده محدودترین خانواده است";
 "antigravity_no_priced_token_history" = "تاریخچهٔ قیمت‌گذاری‌شدهٔ توکن Antigravity موجود نیست.";
+/* Remote account synchronization */
+"remote_account_sync_title" = "Remote account sync";
+"remote_account_sync_subtitle" = "After an account switch, select the matching account on configured SSH hosts.";
+"remote_account_sync_hosts_title" = "SSH hosts";
+"remote_account_sync_footer" = "Only account selections are sent. SSH requires BatchMode and strict host-key checking; credentials stay on each host.";
+"Remote account sync failed" = "Remote account sync failed";
+"Remote account sync failed on: %@" = "Remote account sync failed on: %@";

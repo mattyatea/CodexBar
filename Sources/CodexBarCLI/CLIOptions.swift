@@ -115,6 +115,14 @@ struct GuardOptions: CommanderParsable {
     var failOpen: Bool = false
 }
 
+struct RemoteAccountSyncOptions: CommanderParsable {
+    @Flag(name: .long("stdin"), help: "Read the versioned account selection request from stdin")
+    var stdin: Bool = false
+
+    @Flag(name: .long("json"), help: "Emit the applied result as JSON")
+    var json: Bool = false
+}
+
 enum ProviderSelection: ExpressibleFromArgument {
     case single(UsageProvider)
     case both

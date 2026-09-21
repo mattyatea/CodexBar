@@ -1626,3 +1626,10 @@
 "antigravity_cost_estimate_hint" = "การใช้งานในเครื่อง × ราคา API สาธารณะ · ไม่ใช่ค่าบริการหรือเครดิตของ Antigravity";
 "antigravity_quota_window_note" = "ค่าใช้จ่ายของหน้าต่างครอบคลุมทุกโมเดล · หน้าต่างที่แสดงคือกลุ่มที่จำกัดมากที่สุด";
 "antigravity_no_priced_token_history" = "ไม่มีประวัติโทเคน Antigravity ที่คิดราคาไว้";
+/* Remote account synchronization */
+"remote_account_sync_title" = "Remote account sync";
+"remote_account_sync_subtitle" = "After an account switch, select the matching account on configured SSH hosts.";
+"remote_account_sync_hosts_title" = "SSH hosts";
+"remote_account_sync_footer" = "Only account selections are sent. SSH requires BatchMode and strict host-key checking; credentials stay on each host.";
+"Remote account sync failed" = "Remote account sync failed";
+"Remote account sync failed on: %@" = "Remote account sync failed on: %@";

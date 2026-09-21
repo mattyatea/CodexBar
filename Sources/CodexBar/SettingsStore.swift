@@ -253,6 +253,7 @@ final class SettingsStore {
     @ObservationIgnored let keychainAccessPolicy: SettingsStoreKeychainAccessPolicy
     @ObservationIgnored var config: CodexBarConfig
     @ObservationIgnored var configPersistTask: Task<Void, Never>?
+    @ObservationIgnored var remoteAccountSyncTask: Task<Void, Never>?
     @ObservationIgnored var configFileWatcher: ConfigFileWatcher?
     @ObservationIgnored var configLoading = false
     @ObservationIgnored var cachedCodexAccountReconciliationSnapshot:
@@ -643,6 +644,8 @@ extension SettingsStore {
         let agentSessionsManualHosts = userDefaults.string(forKey: "agentSessionsManualHosts") ?? ""
         let agentSessionsHideUnreachableHosts = userDefaults.object(
             forKey: "agentSessionsHideUnreachableHosts") as? Bool ?? false
+        let remoteAccountSyncEnabled = userDefaults.object(forKey: "remoteAccountSyncEnabled") as? Bool ?? false
+        let remoteAccountSyncHosts = userDefaults.string(forKey: "remoteAccountSyncHosts") ?? ""
         let preferredCurrencyCode = userDefaults.string(forKey: "preferredCurrencyCode") ?? "USD"
         let iCloudSyncEnabled = userDefaults.object(forKey: "iCloudSyncEnabled") as? Bool ?? false
         let iCloudSyncIncludeSecrets = userDefaults.object(forKey: "iCloudSyncIncludeSecrets") as? Bool ?? true
@@ -746,6 +749,8 @@ extension SettingsStore {
             agentSessionLabelStyleRaw: agentSessionLabelStyleRaw,
             agentSessionsManualHosts: agentSessionsManualHosts,
             agentSessionsHideUnreachableHosts: agentSessionsHideUnreachableHosts,
+            remoteAccountSyncEnabled: remoteAccountSyncEnabled,
+            remoteAccountSyncHosts: remoteAccountSyncHosts,
             preferredCurrencyCode: preferredCurrencyCode,
             iCloudSyncEnabled: iCloudSyncEnabled,
             iCloudSyncIncludeSecrets: iCloudSyncIncludeSecrets,

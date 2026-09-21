@@ -94,6 +94,8 @@ struct SettingsDefaultsState {
     var agentSessionLabelStyleRaw: String
     var agentSessionsManualHosts: String
     var agentSessionsHideUnreachableHosts: Bool
+    var remoteAccountSyncEnabled: Bool
+    var remoteAccountSyncHosts: String
     var preferredCurrencyCode: String
     var iCloudSyncEnabled: Bool
     var iCloudSyncIncludeSecrets: Bool

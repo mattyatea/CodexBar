@@ -111,11 +111,43 @@ struct MenuPane: View {
             CostSummarySettingsSection(settings: self.settings, store: self.store)
 
             AgentSessionsSettingsSection(settings: self.settings)
+            RemoteAccountSyncSettingsSection(settings: self.settings)
         }
         .formStyle(.grouped)
         .toggleStyle(.switch)
         .scrollContentBackground(.hidden)
         .background(FocusResigningBackground())
+    }
+}
+
+@MainActor
+struct RemoteAccountSyncSettingsSection: View {
+    @Bindable var settings: SettingsStore
+
+    var body: some View {
+        Section {
+            Toggle(isOn: self.$settings.remoteAccountSyncEnabled) {
+                SettingsRowLabel(
+                    L("remote_account_sync_title"),
+                    subtitle: L("remote_account_sync_subtitle"))
+            }
+
+            LabeledContent(L("remote_account_sync_hosts_title")) {
+                TextField(
+                    L("remote_account_sync_hosts_title"),
+                    text: self.$settings.remoteAccountSyncHosts,
+                    prompt: Text(verbatim: "user@host, user@host"))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 220, idealWidth: 280)
+                    .accessibilityLabel(L("remote_account_sync_hosts_title"))
+            }
+            .disabled(!self.settings.remoteAccountSyncEnabled)
+        } header: {
+            Text(L("remote_account_sync_title"))
+        } footer: {
+            SettingsSectionFooter(L("remote_account_sync_footer"))
+        }
     }
 }
 

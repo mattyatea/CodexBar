@@ -45,6 +45,7 @@ extension SettingsStore {
             entry.tokenAccounts = updated
         }
         self.applyTokenAccountCookieSourceIfNeeded(provider: provider)
+        self.enqueueRemoteTokenAccountSync(provider: provider, account: data.accounts[clamped])
         CodexBarLog.logger(LogCategories.tokenAccounts).info(
             "Active token account updated",
             metadata: [

@@ -271,6 +271,21 @@ struct ProvidersPane: View {
         let result = await self.codexAccountPromotionCoordinator.promote(managedAccountID: managedAccountID)
         if case let .failure(error) = result {
             self.codexAccountsNotice = CodexAccountsSectionNotice(text: error.message, tone: .warning)
+            return
+        }
+
+        guard self.settings.remoteAccountSyncEnabled,
+              let account = self.settings.managedCodexAccount(id: managedAccountID)
+        else {
+            return
+        }
+        let syncResults = await self.settings.synchronizeRemoteAccount(
+            .codex(email: account.email, workspaceAccountID: account.effectiveWorkspaceAccountID))
+        let failedHosts = syncResults.filter { !$0.succeeded }.map(\.host)
+        if !failedHosts.isEmpty {
+            self.codexAccountsNotice = CodexAccountsSectionNotice(
+                text: String(format: L("Remote account sync failed on: %@"), failedHosts.joined(separator: ", ")),
+                tone: .warning)
         }
     }
 
