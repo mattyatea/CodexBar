@@ -1644,6 +1644,6 @@
 "remote_account_sync_test_help" = "Verify SSH access and the remote CodexBar CLI without changing accounts.";
 "remote_account_sync_test_succeeded" = "Connected";
 "remote_account_sync_test_failed" = "Connection failed";
-"remote_account_sync_footer" = "Only account selections are sent. SSH requires BatchMode and strict host-key checking; credentials stay on each host.";
+"remote_account_sync_footer" = "Only account selections are sent. SSH uses ~/.ssh/config for Host, IdentityAgent, IdentityFile, and ProxyCommand; credentials stay on each host.";
 "Remote account sync failed" = "Remote account sync failed";
 "Remote account sync failed on: %@" = "Remote account sync failed on: %@";

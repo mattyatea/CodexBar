@@ -9,7 +9,9 @@ public struct RemoteSSHHost: Codable, Equatable, Hashable, Identifiable, Sendabl
     public let user: String?
     public let port: Int?
 
-    public var id: String { self.alias }
+    public var id: String {
+        self.alias
+    }
 
     public init(
         displayName: String? = nil,
@@ -22,7 +24,7 @@ public struct RemoteSSHHost: Codable, Equatable, Hashable, Identifiable, Sendabl
         self.displayName = Self.nonEmpty(displayName) ?? self.alias
         self.hostname = Self.nonEmpty(hostname)
         self.user = Self.nonEmpty(user)
-        self.port = port.flatMap { (1 ... 65535).contains($0) ? $0 : nil }
+        self.port = port.flatMap { (1...65535).contains($0) ? $0 : nil }
     }
 
     private static func nonEmpty(_ value: String?) -> String? {
@@ -208,7 +210,7 @@ public enum RemoteSSHConfig {
             case "port":
                 if sections[sectionIndex].port == nil,
                    let port = Int(value),
-                   (1 ... 65535).contains(port)
+                   (1...65535).contains(port)
                 {
                     sections[sectionIndex].port = port
                 }

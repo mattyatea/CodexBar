@@ -289,16 +289,23 @@ struct RemoteAccountSyncSettingsSection: View {
             ProgressView()
                 .controlSize(.small)
         } else if let result = self.connectivityResults[host] {
-            let title = result.succeeded
-                ? (result.detail ?? L("remote_account_sync_test_succeeded"))
-                : L("remote_account_sync_test_failed")
-            Label(
-                title,
-                systemImage: result.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.caption)
-                .foregroundStyle(result.succeeded ? .green : .red)
-                .lineLimit(1)
-                .help(result.errorDescription ?? result.detail ?? "")
+            VStack(alignment: .leading, spacing: 1) {
+                Label(
+                    result.succeeded
+                        ? (result.detail ?? L("remote_account_sync_test_succeeded"))
+                        : L("remote_account_sync_test_failed"),
+                    systemImage: result.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(result.succeeded ? .green : .red)
+                    .lineLimit(1)
+                if let errorDescription = result.errorDescription {
+                    Text(errorDescription)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .help(errorDescription)
+                }
+            }
         }
     }
 

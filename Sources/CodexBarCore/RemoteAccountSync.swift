@@ -230,14 +230,18 @@ public struct RemoteAccountSynchronizer: Sendable {
 
     public static func arguments(host: String) throws -> [String] {
         try self.validateHost(host)
+        // Keep OpenSSH's Host/Include/IdentityAgent/IdentityFile/ProxyCommand and
+        // ForwardAgent resolution intact. The system ssh client is intentional:
+        // SSH libraries generally do not reproduce the user's OpenSSH configuration.
         let command = "if command -v codexbar >/dev/null 2>&1; then exec codexbar account-sync --stdin --json; " +
             "else exec /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI account-sync --stdin --json; fi"
         return [
             "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
             "-o", "StrictHostKeyChecking=yes",
             "-o", "RemoteCommand=none",
             "-o", "RequestTTY=no",
+            // This only disables forwarding the local agent into the remote
+            // session; it does not disable using IdentityAgent for SSH auth.
             "-o", "ForwardAgent=no",
             "-o", "ClearAllForwardings=yes",
             "-T", "--", host,
@@ -273,18 +277,21 @@ public struct RemoteAccountSynchronizer: Sendable {
             }
         }
 
-        let allowedEnvironment = Set(["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "SSH_AUTH_SOCK"])
-        let filteredEnvironment = environment.filter { allowedEnvironment.contains($0.key) }
+        // ssh_config supports arbitrary environment expansion in IdentityAgent,
+        // IdentityFile, ProxyCommand, Match exec, and related directives. Pass
+        // the caller's environment through unchanged; this does not transmit
+        // variables to the remote host unless the user's ssh_config requests it
+        // with SendEnv.
+        let sshEnvironment = environment
         return await withTaskGroup(
             of: RemoteAccountSyncHostResult.self,
             returning: [RemoteAccountSyncHostResult].self)
-        {
-            group in
+        { group in
             for host in normalizedHosts {
                 group.addTask {
                     do {
                         let arguments = try Self.arguments(host: host)
-                        let output = try await self.runner(arguments, filteredEnvironment, requestData)
+                        let output = try await self.runner(arguments, sshEnvironment, requestData)
                         let response = try JSONDecoder().decode(
                             RemoteAccountSyncResponse.self,
                             from: Data(output.utf8))
@@ -373,13 +380,14 @@ public struct RemoteAccountConnectivityTester: Sendable {
 
     public static func arguments(host: String) throws -> [String] {
         try RemoteAccountSynchronizer.validateHost(host)
+        // Keep the user's OpenSSH agent and host configuration intact while the
+        // probe remains non-interactive and read-only.
         let command = "if command -v codexbar >/dev/null 2>&1; then exec codexbar account-sync --probe --json; " +
             "else if [ -x /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI ]; then " +
             "exec /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI account-sync --probe --json; " +
             "else echo CodexBar CLI not found >&2; exit 127; fi; fi"
         return [
             "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
             "-o", "StrictHostKeyChecking=yes",
             "-o", "RemoteCommand=none",
             "-o", "RequestTTY=no",
@@ -398,8 +406,9 @@ public struct RemoteAccountConnectivityTester: Sendable {
         let normalizedHosts = RemoteAccountSynchronizer.uniqueHosts(hosts)
         guard !normalizedHosts.isEmpty else { return [] }
 
-        let allowedEnvironment = Set(["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "SSH_AUTH_SOCK"])
-        let filteredEnvironment = environment.filter { allowedEnvironment.contains($0.key) }
+        // Preserve variables referenced by the user's ssh_config, including
+        // custom IdentityAgent and ProxyCommand variables.
+        let sshEnvironment = environment
         return await withTaskGroup(
             of: RemoteAccountConnectivityResult.self,
             returning: [RemoteAccountConnectivityResult].self)
@@ -408,7 +417,7 @@ public struct RemoteAccountConnectivityTester: Sendable {
                 group.addTask {
                     do {
                         let arguments = try Self.arguments(host: host)
-                        let output = try await self.runner(arguments, filteredEnvironment)
+                        let output = try await self.runner(arguments, sshEnvironment)
                         let response = try JSONDecoder().decode(
                             RemoteAccountSyncProbeResponse.self,
                             from: Data(output.utf8))
@@ -445,7 +454,6 @@ public struct RemoteAccountConnectivityTester: Sendable {
             return results.sorted { $0.host.localizedStandardCompare($1.host) == .orderedAscending }
         }
     }
-
 }
 
 public enum RemoteAccountSyncApplyError: LocalizedError, Equatable, Sendable {

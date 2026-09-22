@@ -25,6 +25,7 @@ struct RemoteAccountSyncTests {
         #expect(arguments.contains("BatchMode=yes"))
         #expect(arguments.contains("StrictHostKeyChecking=yes"))
         #expect(arguments.contains("RemoteCommand=none"))
+        #expect(arguments.contains("ConnectTimeout=5") == false)
         #expect(arguments.contains("ForwardAgent=no"))
         #expect(arguments.contains("ClearAllForwardings=yes"))
         #expect(arguments.contains("-T"))
@@ -75,6 +76,7 @@ struct RemoteAccountSyncTests {
         #expect(arguments.contains("BatchMode=yes"))
         #expect(arguments.contains("StrictHostKeyChecking=yes"))
         #expect(arguments.contains("RemoteCommand=none"))
+        #expect(arguments.contains("ConnectTimeout=5") == false)
         #expect(arguments.contains("ForwardAgent=no"))
         #expect(arguments.contains("ClearAllForwardings=yes"))
         #expect(arguments.contains("-T"))
@@ -98,6 +100,29 @@ struct RemoteAccountSyncTests {
         }
 
         let results = await tester.check(hosts: ["remote.example", "remote.example"])
+
+        #expect(results == [
+            RemoteAccountConnectivityResult(
+                host: "remote.example",
+                succeeded: true,
+                detail: "0.63.1 · account-sync v1"),
+        ])
+    }
+
+    @Test
+    func `ssh environment keeps custom agent variables`() async {
+        let tester = RemoteAccountConnectivityTester { _, environment in
+            guard environment["CUSTOM_SSH_AGENT"] == "/tmp/custom-agent.sock" else {
+                throw RemoteAccountSyncError.commandFailed("custom SSH environment was dropped")
+            }
+            let response = RemoteAccountSyncProbeResponse(cliVersion: "0.63.1")
+            let data = try JSONEncoder().encode(response)
+            return String(decoding: data, as: UTF8.self)
+        }
+
+        let results = await tester.check(
+            hosts: ["remote.example"],
+            environment: ["CUSTOM_SSH_AGENT": "/tmp/custom-agent.sock"])
 
         #expect(results == [
             RemoteAccountConnectivityResult(
