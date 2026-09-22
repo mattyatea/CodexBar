@@ -5,6 +5,24 @@ import Foundation
 extension CodexBarCLI {
     static func runRemoteAccountSync(_ values: ParsedValues) async {
         let output = CLIOutputPreferences.from(values: values)
+        if values.flags.contains("probe") {
+            guard !values.flags.contains("stdin") else {
+                Self.exit(
+                    code: .failure,
+                    message: "account-sync --probe cannot be combined with --stdin.",
+                    output: output,
+                    kind: .args)
+            }
+            let response = RemoteAccountSyncProbeResponse(cliVersion: Self.currentVersion())
+            if values.flags.contains("json") {
+                Self.printJSON(response, pretty: false)
+            } else {
+                let version = response.cliVersion.map { "CodexBar \($0)" } ?? "CodexBar"
+                print("\(version) account-sync v\(response.accountSyncSchemaVersion)")
+            }
+            Self.exit(code: .success, output: output, kind: .runtime)
+        }
+
         guard values.flags.contains("stdin") else {
             Self.exit(
                 code: .failure,

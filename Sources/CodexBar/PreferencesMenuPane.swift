@@ -128,6 +128,8 @@ struct RemoteAccountSyncSettingsSection: View {
     @State private var sshConfigError: String?
     @State private var manualHost = ""
     @State private var manualHostError: String?
+    @State private var connectivityResults: [String: RemoteAccountConnectivityResult] = [:]
+    @State private var testingHosts: Set<String> = []
 
     var body: some View {
         Section {
@@ -159,6 +161,19 @@ struct RemoteAccountSyncSettingsSection: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Button {
+                    self.testSelectedSSHHosts()
+                } label: {
+                    if self.testingHosts.isEmpty {
+                        Label(L("remote_account_sync_test_selected"), systemImage: "network")
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(
+                    self.settings.remoteAccountSyncHostList.isEmpty || !self.testingHosts.isEmpty)
+                .help(L("remote_account_sync_test_help"))
+                Button {
                     self.reloadSSHConfig()
                 } label: {
                     if self.isLoadingSSHConfig {
@@ -181,19 +196,7 @@ struct RemoteAccountSyncSettingsSection: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(self.discoveredSSHHosts) { host in
-                    Toggle(
-                        isOn: self.hostSelectionBinding(for: host.alias))
-                    {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(host.displayName)
-                            if let detail = self.hostDetail(host), !detail.isEmpty {
-                                Text(detail)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .toggleStyle(.checkbox)
+                    self.configHostRow(host)
                 }
             }
         }
@@ -209,6 +212,8 @@ struct RemoteAccountSyncSettingsSection: View {
                         Text(host)
                             .textSelection(.enabled)
                         Spacer()
+                        self.connectivityStatus(for: host)
+                        self.testButton(for: host)
                         Button(L("remove"), role: .destructive) {
                             self.settings.removeRemoteAccountSyncHost(host)
                         }
@@ -240,6 +245,25 @@ struct RemoteAccountSyncSettingsSection: View {
         .disabled(!self.settings.remoteAccountSyncEnabled)
     }
 
+    private func configHostRow(_ host: RemoteSSHHost) -> some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: self.hostSelectionBinding(for: host.alias)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(host.displayName)
+                    if let detail = self.hostDetail(host), !detail.isEmpty {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .toggleStyle(.checkbox)
+            Spacer(minLength: 4)
+            self.connectivityStatus(for: host.alias)
+            self.testButton(for: host.alias)
+        }
+    }
+
     private var manualHosts: [String] {
         let discovered = Set(self.discoveredSSHHosts.map(\.alias))
         return self.settings.remoteAccountSyncHostList.filter { !discovered.contains($0) }
@@ -257,6 +281,61 @@ struct RemoteAccountSyncSettingsSection: View {
         if let hostname = host.hostname { values.append(hostname) }
         if let port = host.port { values.append("port \(port)") }
         return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func connectivityStatus(for host: String) -> some View {
+        if self.testingHosts.contains(host) {
+            ProgressView()
+                .controlSize(.small)
+        } else if let result = self.connectivityResults[host] {
+            let title = result.succeeded
+                ? (result.detail ?? L("remote_account_sync_test_succeeded"))
+                : L("remote_account_sync_test_failed")
+            Label(
+                title,
+                systemImage: result.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(result.succeeded ? .green : .red)
+                .lineLimit(1)
+                .help(result.errorDescription ?? result.detail ?? "")
+        }
+    }
+
+    private func testButton(for host: String) -> some View {
+        Button {
+            self.testRemoteHosts([host])
+        } label: {
+            Image(systemName: "network")
+        }
+        .buttonStyle(.borderless)
+        .disabled(self.testingHosts.contains(host))
+        .help(L("remote_account_sync_test_host"))
+    }
+
+    private func testSelectedSSHHosts() {
+        self.testRemoteHosts(self.settings.remoteAccountSyncHostList)
+    }
+
+    private func testRemoteHosts(_ hosts: [String]) {
+        let hosts = Array(Set(hosts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }))
+            .filter { !$0.isEmpty }
+            .sorted()
+        guard !hosts.isEmpty else { return }
+
+        self.testingHosts.formUnion(hosts)
+        for host in hosts {
+            self.connectivityResults[host] = nil
+        }
+
+        Task { @MainActor in
+            let results = await RemoteAccountConnectivityTester().check(hosts: hosts)
+            for result in results {
+                self.connectivityResults[result.host] = result
+                self.testingHosts.remove(result.host)
+            }
+            self.testingHosts.subtract(hosts)
+        }
     }
 
     private func reloadSSHConfig() {

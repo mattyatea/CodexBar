@@ -119,7 +119,10 @@ struct RemoteAccountSyncOptions: CommanderParsable {
     @Flag(name: .long("stdin"), help: "Read the versioned account selection request from stdin")
     var stdin: Bool = false
 
-    @Flag(name: .long("json"), help: "Emit the applied result as JSON")
+    @Flag(name: .long("probe"), help: "Report account-sync support without changing an account")
+    var probe: Bool = false
+
+    @Flag(name: .long("json"), help: "Emit the result as JSON")
     var json: Bool = false
 }
 

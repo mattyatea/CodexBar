@@ -1635,6 +1635,11 @@
 "remote_account_sync_no_config_hosts" = "~/.ssh/config に選択可能な Host エントリがありません。";
 "remote_account_sync_config_read_failed" = "~/.ssh/config を読み込めませんでした。";
 "remote_account_sync_invalid_host" = "有効な SSH エイリアスまたは user@host を入力してください。";
+"remote_account_sync_test_selected" = "選択したホストをテスト";
+"remote_account_sync_test_host" = "SSH接続をテスト";
+"remote_account_sync_test_help" = "アカウントを変更せずにSSH接続とリモートCodexBar CLIを確認します。";
+"remote_account_sync_test_succeeded" = "接続済み";
+"remote_account_sync_test_failed" = "接続に失敗";
 "remote_account_sync_footer" = "送信するのはアカウント選択だけです。SSH は BatchMode と厳格なホストキー検証を使い、資格情報は各ホストに残ります。";
 "Remote account sync failed" = "リモートアカウント同期に失敗しました";
 "Remote account sync failed on: %@" = "リモートアカウント同期に失敗したホスト: %@";

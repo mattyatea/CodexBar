@@ -28,9 +28,10 @@ struct RemoteAccountSyncTests {
         #expect(arguments.contains("ForwardAgent=no"))
         #expect(arguments.contains("ClearAllForwardings=yes"))
         #expect(arguments.contains("-T"))
-        #expect(arguments.contains("account-sync"))
-        #expect(arguments.contains("--stdin"))
-        #expect(arguments.contains("--json"))
+        let remoteCommand = arguments.last ?? ""
+        #expect(remoteCommand.contains("account-sync"))
+        #expect(remoteCommand.contains("--stdin"))
+        #expect(remoteCommand.contains("--json"))
         #expect(arguments.contains("-n") == false)
         let expectedCommand = "'if command -v codexbar >/dev/null 2>&1; then exec codexbar account-sync --stdin --json; "
             + "else exec /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI account-sync --stdin --json; fi'"
@@ -65,5 +66,60 @@ struct RemoteAccountSyncTests {
                 selection: .codex(email: "person@example.com", workspaceAccountID: nil)))
 
         #expect(results == [RemoteAccountSyncHostResult(host: "remote.example", succeeded: true)])
+    }
+
+    @Test
+    func `connectivity arguments are read only and use the version probe`() throws {
+        let arguments = try RemoteAccountConnectivityTester.arguments(host: "builder@example.com")
+
+        #expect(arguments.contains("BatchMode=yes"))
+        #expect(arguments.contains("StrictHostKeyChecking=yes"))
+        #expect(arguments.contains("RemoteCommand=none"))
+        #expect(arguments.contains("ForwardAgent=no"))
+        #expect(arguments.contains("ClearAllForwardings=yes"))
+        #expect(arguments.contains("-T"))
+        #expect(arguments.contains("-n"))
+        let remoteCommand = arguments.last ?? ""
+        #expect(remoteCommand.contains("--stdin") == false)
+        #expect(remoteCommand.contains("account-sync --probe --json"))
+        let expectedCommand = "'if command -v codexbar >/dev/null 2>&1; then exec codexbar account-sync --probe --json; "
+            + "else if [ -x /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI ]; then "
+            + "exec /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI account-sync --probe --json; "
+            + "else echo CodexBar CLI not found >&2; exit 127; fi; fi'"
+        #expect(arguments.last == expectedCommand)
+    }
+
+    @Test
+    func `connectivity check reports remote CLI output`() async {
+        let tester = RemoteAccountConnectivityTester { _, _ in
+            let response = RemoteAccountSyncProbeResponse(cliVersion: "0.63.1")
+            let data = try! JSONEncoder().encode(response)
+            return String(decoding: data, as: UTF8.self)
+        }
+
+        let results = await tester.check(hosts: ["remote.example", "remote.example"])
+
+        #expect(results == [
+            RemoteAccountConnectivityResult(
+                host: "remote.example",
+                succeeded: true,
+                detail: "0.63.1 · account-sync v1"),
+        ])
+    }
+
+    @Test
+    func `connectivity check returns a safe failure without applying an account`() async {
+        let tester = RemoteAccountConnectivityTester { _, _ in
+            throw RemoteAccountSyncError.commandFailed("permission denied\nprivate detail")
+        }
+
+        let results = await tester.check(hosts: ["remote.example"])
+
+        #expect(results == [
+            RemoteAccountConnectivityResult(
+                host: "remote.example",
+                succeeded: false,
+                errorDescription: "Remote account sync failed: permission denied private detail"),
+        ])
     }
 }

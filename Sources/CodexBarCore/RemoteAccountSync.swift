@@ -102,6 +102,25 @@ public struct RemoteAccountSyncResponse: Codable, Equatable, Sendable {
     }
 }
 
+/// A read-only capability handshake for the remote account-sync receiver.
+public struct RemoteAccountSyncProbeResponse: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 1
+
+    public let schemaVersion: Int
+    public let cliVersion: String?
+    public let accountSyncSchemaVersion: Int
+
+    public init(
+        cliVersion: String?,
+        accountSyncSchemaVersion: Int = RemoteAccountSyncRequest.currentSchemaVersion,
+        schemaVersion: Int = RemoteAccountSyncProbeResponse.currentSchemaVersion)
+    {
+        self.schemaVersion = schemaVersion
+        self.cliVersion = cliVersion
+        self.accountSyncSchemaVersion = accountSyncSchemaVersion
+    }
+}
+
 public struct RemoteAccountSyncHostResult: Equatable, Sendable {
     public let host: String
     public let succeeded: Bool
@@ -110,6 +129,30 @@ public struct RemoteAccountSyncHostResult: Equatable, Sendable {
     public init(host: String, succeeded: Bool, errorDescription: String? = nil) {
         self.host = host
         self.succeeded = succeeded
+        self.errorDescription = errorDescription
+    }
+}
+
+/// The result of a non-mutating SSH and remote CodexBar CLI probe.
+public struct RemoteAccountConnectivityResult: Equatable, Sendable, Identifiable {
+    public let host: String
+    public let succeeded: Bool
+    public let detail: String?
+    public let errorDescription: String?
+
+    public var id: String {
+        self.host
+    }
+
+    public init(
+        host: String,
+        succeeded: Bool,
+        detail: String? = nil,
+        errorDescription: String? = nil)
+    {
+        self.host = host
+        self.succeeded = succeeded
+        self.detail = detail
         self.errorDescription = errorDescription
     }
 }
@@ -275,7 +318,7 @@ public struct RemoteAccountSynchronizer: Sendable {
         }
     }
 
-    private static func uniqueHosts(_ hosts: [String]) -> [String] {
+    fileprivate static func uniqueHosts(_ hosts: [String]) -> [String] {
         var seen: Set<String> = []
         return hosts.compactMap { raw in
             let host = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -284,7 +327,7 @@ public struct RemoteAccountSynchronizer: Sendable {
         }
     }
 
-    private static func safeErrorDescription(_ error: Error) -> String {
+    fileprivate static func safeErrorDescription(_ error: Error) -> String {
         let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         let singleLine = raw
             .split(whereSeparator: \.isNewline)
@@ -292,6 +335,117 @@ public struct RemoteAccountSynchronizer: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return String(singleLine.prefix(300))
     }
+}
+
+/// Checks SSH access and the remote CodexBar account-sync capability without
+/// changing any provider account. The remote probe is read-only and never
+/// enters the account-sync receiver.
+public struct RemoteAccountConnectivityTester: Sendable {
+    public typealias Runner = @Sendable (
+        _ arguments: [String],
+        _ environment: [String: String]) async throws -> String
+
+    public static let maximumOutputBytes = 4 * 1024
+
+    private let runner: Runner
+
+    public init() {
+        self.runner = { arguments, environment in
+            let binary = ["/usr/bin/ssh", "/bin/ssh"].first {
+                FileManager.default.isExecutableFile(atPath: $0)
+            }
+            guard let binary else { throw RemoteAccountSyncError.unavailable }
+            let result = try await SubprocessRunner.run(
+                binary: binary,
+                arguments: arguments,
+                environment: environment,
+                timeout: 15,
+                maxOutputBytes: Self.maximumOutputBytes,
+                standardInput: FileHandle.nullDevice,
+                label: "test remote account sync connection")
+            return result.stdout
+        }
+    }
+
+    public init(runner: @escaping Runner) {
+        self.runner = runner
+    }
+
+    public static func arguments(host: String) throws -> [String] {
+        try RemoteAccountSynchronizer.validateHost(host)
+        let command = "if command -v codexbar >/dev/null 2>&1; then exec codexbar account-sync --probe --json; " +
+            "else if [ -x /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI ]; then " +
+            "exec /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI account-sync --probe --json; " +
+            "else echo CodexBar CLI not found >&2; exit 127; fi; fi"
+        return [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", "RemoteCommand=none",
+            "-o", "RequestTTY=no",
+            "-o", "ForwardAgent=no",
+            "-o", "ClearAllForwardings=yes",
+            "-T", "-n", "--", host,
+            "sh", "-lc", "'\(command)'",
+        ]
+    }
+
+    public func check(
+        hosts: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment) async
+        -> [RemoteAccountConnectivityResult]
+    {
+        let normalizedHosts = RemoteAccountSynchronizer.uniqueHosts(hosts)
+        guard !normalizedHosts.isEmpty else { return [] }
+
+        let allowedEnvironment = Set(["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "SSH_AUTH_SOCK"])
+        let filteredEnvironment = environment.filter { allowedEnvironment.contains($0.key) }
+        return await withTaskGroup(
+            of: RemoteAccountConnectivityResult.self,
+            returning: [RemoteAccountConnectivityResult].self)
+        { group in
+            for host in normalizedHosts {
+                group.addTask {
+                    do {
+                        let arguments = try Self.arguments(host: host)
+                        let output = try await self.runner(arguments, filteredEnvironment)
+                        let response = try JSONDecoder().decode(
+                            RemoteAccountSyncProbeResponse.self,
+                            from: Data(output.utf8))
+                        guard response.schemaVersion == RemoteAccountSyncProbeResponse.currentSchemaVersion,
+                              response.accountSyncSchemaVersion == RemoteAccountSyncRequest.currentSchemaVersion
+                        else {
+                            throw RemoteAccountSyncError.invalidResponse
+                        }
+                        let detail = response.cliVersion.map {
+                            "\($0) · account-sync v\(response.accountSyncSchemaVersion)"
+                        } ?? "account-sync v\(response.accountSyncSchemaVersion)"
+                        return RemoteAccountConnectivityResult(
+                            host: host,
+                            succeeded: true,
+                            detail: detail)
+                    } catch is CancellationError {
+                        return RemoteAccountConnectivityResult(
+                            host: host,
+                            succeeded: false,
+                            errorDescription: "Cancelled")
+                    } catch {
+                        return RemoteAccountConnectivityResult(
+                            host: host,
+                            succeeded: false,
+                            errorDescription: RemoteAccountSynchronizer.safeErrorDescription(error))
+                    }
+                }
+            }
+
+            var results: [RemoteAccountConnectivityResult] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results.sorted { $0.host.localizedStandardCompare($1.host) == .orderedAscending }
+        }
+    }
+
 }
 
 public enum RemoteAccountSyncApplyError: LocalizedError, Equatable, Sendable {
