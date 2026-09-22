@@ -1622,3 +1622,26 @@
 "antigravity_cost_estimate_hint" = "ローカル使用量 × 公開API価格 · Antigravity の請求やクレジットではありません";
 "antigravity_quota_window_note" = "ウィンドウの費用は全モデルを含みます · 表示中のウィンドウは最も制限の厳しいファミリーです";
 "antigravity_no_priced_token_history" = "価格付きの Antigravity トークン履歴がありません。";
+/* リモートアカウント同期 */
+"remote_account_sync_title" = "リモートアカウント同期";
+"remote_account_sync_subtitle" = "アカウント切り替え後、設定した SSH ホストでも対応するアカウントを選択します。";
+"remote_account_sync_hosts_title" = "SSH ホスト";
+"remote_account_sync_config_hosts_title" = "~/.ssh/config のホスト";
+"remote_account_sync_manual_hosts_title" = "手動で追加したホスト";
+"remote_account_sync_manual_add_title" = "ホストを手動で追加";
+"remote_account_sync_manual_host_placeholder" = "SSH エイリアスまたは user@host";
+"remote_account_sync_refresh_config_help" = "~/.ssh/config を再読み込み";
+"remote_account_sync_loading_config" = "~/.ssh/config を読み込み中…";
+"remote_account_sync_no_config_hosts" = "~/.ssh/config に選択可能な Host エントリがありません。";
+"remote_account_sync_config_read_failed" = "~/.ssh/config を読み込めませんでした。";
+"remote_account_sync_invalid_host" = "有効な SSH エイリアスまたは user@host を入力してください。";
+"remote_account_sync_test_selected" = "選択したホストをテスト";
+"remote_account_sync_test_host" = "SSH接続をテスト";
+"remote_account_sync_test_help" = "アカウントを変更せずに、SSH接続と一時的なリモート同期ヘルパーを確認します。";
+"remote_account_sync_test_succeeded" = "接続済み";
+"remote_account_sync_test_failed" = "接続に失敗";
+"remote_account_sync_1password_authorization_help" = "1Password SSH Agent を使っている場合は、1Password を起動してロックを解除し、SSH鍵の利用リクエストを承認してください。確認画面が見つからない場合は、メニューバーの1Passwordアイコンから「SSH request waiting」を開いてから再試行してください。";
+"remote_account_sync_open_1password" = "1Passwordを開く";
+"remote_account_sync_footer" = "送信するのはアカウント選択だけです。リモートにCodexBarをインストールせず、一時ヘルパーを各操作後に削除します。SSH は ~/.ssh/config の Host、IdentityAgent、IdentityFile、ProxyCommand をそのまま使い、資格情報は各ホストに残ります。";
+"Remote account sync failed" = "リモートアカウント同期に失敗しました";
+"Remote account sync failed on: %@" = "リモートアカウント同期に失敗したホスト: %@";

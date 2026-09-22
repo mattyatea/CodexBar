@@ -76,6 +76,10 @@ extension SettingsStore {
         return account
     }
 
+    func managedCodexAccount(id: UUID) -> ManagedCodexAccount? {
+        try? self.loadManagedCodexAccounts().account(id: id)
+    }
+
     var activeManagedCodexRemoteHomePath: String? {
         self.managedCodexRemoteHomePath(forActiveSource: self.codexResolvedActiveSource)
     }

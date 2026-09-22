@@ -2,6 +2,22 @@ import CodexBarCore
 import Foundation
 
 extension CodexBarCLI {
+    static func accountSyncHelp(version: String) -> String {
+        """
+        CodexBar \(version)
+
+        Usage:
+          codexbar account-sync --stdin --json
+          codexbar account-sync --probe --json
+
+        Description:
+          Apply one provider account selection from a versioned JSON request on stdin.
+          Use --probe for a read-only capability check over SSH. This command is intended
+          for CodexBar-to-CodexBar SSH synchronization and never accepts credentials on
+          the command line.
+        """
+    }
+
     static func pluginsHelp(version: String) -> String {
         """
         CodexBar \(version)

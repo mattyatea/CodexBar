@@ -192,4 +192,36 @@ struct CodexAccountsSectionStateTests {
         #expect(state.canReauthenticate(managedAccount) == false)
         #expect(state.canRemove(managedAccount) == false)
     }
+
+    @Test
+    func `remote sync retry in flight blocks account operations`() {
+        let managedAccountID = UUID()
+        let managedAccount = CodexVisibleAccount(
+            id: "managed:\(managedAccountID.uuidString.lowercased())",
+            email: "managed@example.com",
+            storedAccountID: managedAccountID,
+            selectionSource: .managedAccount(id: managedAccountID),
+            isActive: true,
+            isLive: false,
+            canReauthenticate: true,
+            canRemove: true)
+        let state = CodexAccountsSectionState(
+            visibleAccounts: [managedAccount],
+            activeVisibleAccountID: managedAccount.id,
+            liveVisibleAccountID: nil,
+            hasUnreadableManagedAccountStore: false,
+            isAuthenticatingManagedAccount: false,
+            authenticatingManagedAccountID: nil,
+            isRemovingManagedAccount: false,
+            isAuthenticatingLiveAccount: false,
+            isPromotingSystemAccount: false,
+            notice: CodexAccountsSectionNotice(text: "Remote sync failed", tone: .warning),
+            canRetryRemoteAccountSync: true,
+            isRetryingRemoteAccountSync: true)
+
+        #expect(state.canRetryRemoteAccountSync)
+        #expect(state.canAddAccount == false)
+        #expect(state.canReauthenticate(managedAccount) == false)
+        #expect(state.canRemove(managedAccount) == false)
+    }
 }

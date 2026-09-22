@@ -69,6 +69,8 @@ enum CodexBarCLI {
                 self.runCacheClear(invocation.parsedValues)
             case ["cookie", "refresh"]:
                 await self.runCookieRefreshWithTermination(invocation.parsedValues)
+            case ["account-sync"]:
+                await self.runRemoteAccountSync(invocation.parsedValues)
             case ["diagnose"]:
                 let signalMonitor = CLITerminationSignalMonitor { signalNumber in
                     CLITerminationSignalMonitor.terminateActiveHelpersAndReraise(signalNumber)
@@ -173,6 +175,7 @@ enum CodexBarCLI {
         let cacheSignature = CommandSignature.describe(CacheOptions())
         let diagnoseSignature = CommandSignature.describe(DiagnoseOptions())
         let guardSignature = CommandSignature.describe(GuardOptions())
+        let remoteAccountSyncSignature = CommandSignature.describe(RemoteAccountSyncOptions())
 
         var descriptors = [
             CommandDescriptor(
@@ -272,6 +275,11 @@ enum CodexBarCLI {
                 ],
                 defaultSubcommandName: "clear"),
             Self.cookieCommandDescriptor(),
+            CommandDescriptor(
+                name: "account-sync",
+                abstract: "Apply a provider account selection received over stdin",
+                discussion: nil,
+                signature: remoteAccountSyncSignature),
             CommandDescriptor(
                 name: "diagnose",
                 abstract: "Run provider diagnostic and emit safe JSON export",

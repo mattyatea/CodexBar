@@ -1,3 +1,4 @@
+import AppKit
 import CodexBarCore
 import SwiftUI
 
@@ -111,11 +112,285 @@ struct MenuPane: View {
             CostSummarySettingsSection(settings: self.settings, store: self.store)
 
             AgentSessionsSettingsSection(settings: self.settings)
+            RemoteAccountSyncSettingsSection(settings: self.settings)
         }
         .formStyle(.grouped)
         .toggleStyle(.switch)
         .scrollContentBackground(.hidden)
         .background(FocusResigningBackground())
+    }
+}
+
+@MainActor
+struct RemoteAccountSyncSettingsSection: View {
+    @Bindable var settings: SettingsStore
+    @State private var discoveredSSHHosts: [RemoteSSHHost] = []
+    @State private var isLoadingSSHConfig = false
+    @State private var sshConfigError: String?
+    @State private var manualHost = ""
+    @State private var manualHostError: String?
+    @State private var connectivityResults: [String: RemoteAccountConnectivityResult] = [:]
+    @State private var testingHosts: Set<String> = []
+
+    var body: some View {
+        Section {
+            Toggle(isOn: self.$settings.remoteAccountSyncEnabled) {
+                SettingsRowLabel(
+                    L("remote_account_sync_title"),
+                    subtitle: L("remote_account_sync_subtitle"))
+            }
+
+            if self.settings.remoteAccountSyncEnabled {
+                self.hostSelection
+            }
+        } header: {
+            Text(L("remote_account_sync_title"))
+        } footer: {
+            SettingsSectionFooter(L("remote_account_sync_footer"))
+        }
+        .task(id: self.settings.remoteAccountSyncEnabled) {
+            guard self.settings.remoteAccountSyncEnabled else { return }
+            self.reloadSSHConfig()
+        }
+    }
+
+    @ViewBuilder
+    private var hostSelection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(L("remote_account_sync_config_hosts_title"))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button {
+                    self.testSelectedSSHHosts()
+                } label: {
+                    if self.testingHosts.isEmpty {
+                        Label(L("remote_account_sync_test_selected"), systemImage: "network")
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(
+                    self.settings.remoteAccountSyncHostList.isEmpty || !self.testingHosts.isEmpty)
+                .help(L("remote_account_sync_test_help"))
+                Button {
+                    self.reloadSSHConfig()
+                } label: {
+                    if self.isLoadingSSHConfig {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label(L("Refresh"), systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(self.isLoadingSSHConfig)
+                .help(L("remote_account_sync_refresh_config_help"))
+            }
+
+            if self.isLoadingSSHConfig, self.discoveredSSHHosts.isEmpty {
+                ProgressView(L("remote_account_sync_loading_config"))
+                    .controlSize(.small)
+            } else if self.discoveredSSHHosts.isEmpty {
+                Text(self.sshConfigError ?? L("remote_account_sync_no_config_hosts"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(self.discoveredSSHHosts) { host in
+                    self.configHostRow(host)
+                }
+            }
+        }
+
+        if !self.manualHosts.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L("remote_account_sync_manual_hosts_title"))
+                    .font(.subheadline.weight(.semibold))
+                ForEach(self.manualHosts, id: \.self) { host in
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                        Text(host)
+                            .textSelection(.enabled)
+                        Spacer()
+                        self.connectivityStatus(for: host)
+                        self.testButton(for: host)
+                        Button(L("remove"), role: .destructive) {
+                            self.settings.removeRemoteAccountSyncHost(host)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+        }
+
+        VStack(alignment: .leading, spacing: 5) {
+            Text(L("remote_account_sync_manual_add_title"))
+                .font(.subheadline.weight(.semibold))
+            HStack {
+                TextField(
+                    L("remote_account_sync_manual_host_placeholder"),
+                    text: self.$manualHost,
+                    prompt: Text(verbatim: "alias or user@host"))
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { self.addManualHost() }
+                Button(L("Add")) { self.addManualHost() }
+                    .disabled(self.manualHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if let manualHostError = self.manualHostError {
+                Text(manualHostError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .disabled(!self.settings.remoteAccountSyncEnabled)
+    }
+
+    private func configHostRow(_ host: RemoteSSHHost) -> some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: self.hostSelectionBinding(for: host.alias)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(host.displayName)
+                    if let detail = self.hostDetail(host), !detail.isEmpty {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .toggleStyle(.checkbox)
+            Spacer(minLength: 4)
+            self.connectivityStatus(for: host.alias)
+            self.testButton(for: host.alias)
+        }
+    }
+
+    private var manualHosts: [String] {
+        let discovered = Set(self.discoveredSSHHosts.map(\.alias))
+        return self.settings.remoteAccountSyncHostList.filter { !discovered.contains($0) }
+    }
+
+    private func hostSelectionBinding(for alias: String) -> Binding<Bool> {
+        Binding(
+            get: { self.settings.remoteAccountSyncHostList.contains(alias) },
+            set: { self.settings.setRemoteAccountSyncHost(alias, selected: $0) })
+    }
+
+    private func hostDetail(_ host: RemoteSSHHost) -> String? {
+        var values: [String] = []
+        if let user = host.user { values.append(user) }
+        if let hostname = host.hostname { values.append(hostname) }
+        if let port = host.port { values.append("port \(port)") }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func connectivityStatus(for host: String) -> some View {
+        if self.testingHosts.contains(host) {
+            ProgressView()
+                .controlSize(.small)
+        } else if let result = self.connectivityResults[host] {
+            VStack(alignment: .leading, spacing: 1) {
+                Label(
+                    result.succeeded
+                        ? (result.detail ?? L("remote_account_sync_test_succeeded"))
+                        : L("remote_account_sync_test_failed"),
+                    systemImage: result.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(result.succeeded ? .green : .red)
+                    .lineLimit(1)
+                if let errorDescription = result.errorDescription {
+                    Text(errorDescription)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .help(errorDescription)
+
+                    if RemoteAccountSSHAgentDiagnostics.shouldOfferAuthorizationHelp(for: errorDescription) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L("remote_account_sync_1password_authorization_help"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button(L("remote_account_sync_open_1password")) {
+                                self.openOnePassword()
+                            }
+                            .buttonStyle(.link)
+                            .font(.caption2)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func testButton(for host: String) -> some View {
+        Button {
+            self.testRemoteHosts([host])
+        } label: {
+            Image(systemName: "network")
+        }
+        .buttonStyle(.borderless)
+        .disabled(self.testingHosts.contains(host))
+        .help(L("remote_account_sync_test_host"))
+    }
+
+    private func testSelectedSSHHosts() {
+        self.testRemoteHosts(self.settings.remoteAccountSyncHostList)
+    }
+
+    private func testRemoteHosts(_ hosts: [String]) {
+        let hosts = Array(Set(hosts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }))
+            .filter { !$0.isEmpty }
+            .sorted()
+        guard !hosts.isEmpty else { return }
+
+        self.testingHosts.formUnion(hosts)
+        for host in hosts {
+            self.connectivityResults[host] = nil
+        }
+
+        Task { @MainActor in
+            let results = await RemoteAccountConnectivityTester().check(hosts: hosts)
+            for result in results {
+                self.connectivityResults[result.host] = result
+                self.testingHosts.remove(result.host)
+            }
+            self.testingHosts.subtract(hosts)
+        }
+    }
+
+    private func openOnePassword() {
+        guard let applicationURL = NSWorkspace.shared
+            .urlForApplication(withBundleIdentifier: "com.1password.1password")
+        else {
+            return
+        }
+        NSWorkspace.shared.open(applicationURL)
+    }
+
+    private func reloadSSHConfig() {
+        guard !self.isLoadingSSHConfig else { return }
+        self.isLoadingSSHConfig = true
+        self.sshConfigError = nil
+        defer { self.isLoadingSSHConfig = false }
+        do {
+            self.discoveredSSHHosts = try RemoteSSHConfig.hosts()
+        } catch {
+            self.discoveredSSHHosts = []
+            self.sshConfigError = L("remote_account_sync_config_read_failed")
+        }
+    }
+
+    private func addManualHost() {
+        let candidate = self.manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else { return }
+        guard self.settings.addRemoteAccountSyncHost(candidate) else {
+            self.manualHostError = L("remote_account_sync_invalid_host")
+            return
+        }
+        self.manualHost = ""
+        self.manualHostError = nil
     }
 }
 

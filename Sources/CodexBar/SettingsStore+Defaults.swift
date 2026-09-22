@@ -1252,6 +1252,22 @@ extension SettingsStore {
         }
     }
 
+    var remoteAccountSyncEnabled: Bool {
+        get { self.defaultsState.remoteAccountSyncEnabled }
+        set {
+            self.defaultsState.remoteAccountSyncEnabled = newValue
+            self.userDefaults.set(newValue, forKey: "remoteAccountSyncEnabled")
+        }
+    }
+
+    var remoteAccountSyncHosts: String {
+        get { self.defaultsState.remoteAccountSyncHosts }
+        set {
+            self.defaultsState.remoteAccountSyncHosts = newValue
+            self.userDefaults.set(newValue, forKey: "remoteAccountSyncHosts")
+        }
+    }
+
     var preferredCurrencyCode: String {
         get { self.defaultsState.preferredCurrencyCode }
         set {

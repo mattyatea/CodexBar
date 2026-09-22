@@ -172,6 +172,9 @@ extension UsageStore {
                 executablePath: executablePath,
                 configurationGeneration: configurationGeneration)
             {
+                if switchError == nil, let slot = Int(accountID.opaqueID) {
+                    self.settings.enqueueRemoteAccountSync(.claudeSwap(slot: slot, email: account.accountEmail))
+                }
                 self.claudeSwapTransientState.lastError = switchError
                 self.claudeSwapTransientState.lastErrorAccountID = switchError == nil ? nil : accountID
                 self.claudeSwapTransientState.switchPhase = .reconciling

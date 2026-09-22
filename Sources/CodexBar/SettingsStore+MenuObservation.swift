@@ -77,6 +77,8 @@ extension SettingsStore {
         _ = self.agentSessionLabelStyle
         _ = self.agentSessionsManualHosts
         _ = self.agentSessionsHideUnreachableHosts
+        _ = self.remoteAccountSyncEnabled
+        _ = self.remoteAccountSyncHosts
         _ = self.iCloudSyncEnabled
         _ = self.iCloudSyncSnapshotsEnabled
         _ = self.iCloudSyncShowFleetAccounts
