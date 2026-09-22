@@ -79,8 +79,11 @@ package enum RemoteAccountSyncTransport {
         }
     }
 
-    package static let maximumHelperBytes = 64 * 1024 * 1024
-    package static let maximumPayloadBytes = 96 * 1024 * 1024
+    // Linux Swift release helpers include the Swift runtime and can be over
+    // 100 MiB even after stripping. Keep a bounded limit, but leave enough
+    // room for both the x86_64/aarch64 helpers and the tar envelope.
+    package static let maximumHelperBytes = 192 * 1024 * 1024
+    package static let maximumPayloadBytes = 196 * 1024 * 1024
 
     package static func bundledHelperData(
         for target: RemoteAccountSyncTarget? = nil,

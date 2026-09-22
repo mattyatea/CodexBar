@@ -106,6 +106,12 @@ struct RemoteAccountSyncTests {
     }
 
     @Test
+    func `transport accepts release-sized Linux helpers`() {
+        #expect(RemoteAccountSyncTransport.maximumHelperBytes >= 128 * 1024 * 1024)
+        #expect(RemoteAccountSyncTransport.maximumPayloadBytes > RemoteAccountSyncTransport.maximumHelperBytes)
+    }
+
+    @Test
     func `host validation rejects shell input`() {
         #expect(throws: RemoteAccountSyncError.invalidHost) {
             try RemoteAccountSynchronizer.validateHost("builder; touch /tmp/pwned")
