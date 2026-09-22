@@ -1637,9 +1637,9 @@
 "remote_account_sync_invalid_host" = "有効な SSH エイリアスまたは user@host を入力してください。";
 "remote_account_sync_test_selected" = "選択したホストをテスト";
 "remote_account_sync_test_host" = "SSH接続をテスト";
-"remote_account_sync_test_help" = "アカウントを変更せずにSSH接続とリモートCodexBar CLIを確認します。";
+"remote_account_sync_test_help" = "アカウントを変更せずに、SSH接続と一時的なリモート同期ヘルパーを確認します。";
 "remote_account_sync_test_succeeded" = "接続済み";
 "remote_account_sync_test_failed" = "接続に失敗";
-"remote_account_sync_footer" = "送信するのはアカウント選択だけです。SSH は ~/.ssh/config の Host、IdentityAgent、IdentityFile、ProxyCommand をそのまま使い、資格情報は各ホストに残ります。";
+"remote_account_sync_footer" = "送信するのはアカウント選択だけです。リモートにCodexBarをインストールせず、一時ヘルパーを各操作後に削除します。SSH は ~/.ssh/config の Host、IdentityAgent、IdentityFile、ProxyCommand をそのまま使い、資格情報は各ホストに残ります。";
 "Remote account sync failed" = "リモートアカウント同期に失敗しました";
 "Remote account sync failed on: %@" = "リモートアカウント同期に失敗したホスト: %@";

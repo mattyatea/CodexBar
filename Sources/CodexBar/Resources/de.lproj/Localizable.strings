@@ -1641,6 +1641,6 @@
 "remote_account_sync_invalid_host" = "Enter a valid SSH alias or user@host.";
 "remote_account_sync_test_selected" = "Test selected";
 "remote_account_sync_test_host" = "Test SSH connection";
-"remote_account_sync_test_help" = "Verify SSH access and the remote CodexBar CLI without changing accounts.";
+"remote_account_sync_test_help" = "Verify SSH access and the temporary account-sync helper without changing accounts.";
 "remote_account_sync_test_succeeded" = "Connected";
 "remote_account_sync_test_failed" = "Connection failed";

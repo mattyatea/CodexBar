@@ -133,7 +133,7 @@ public struct RemoteAccountSyncHostResult: Equatable, Sendable {
     }
 }
 
-/// The result of a non-mutating SSH and remote CodexBar CLI probe.
+/// The result of a non-mutating SSH and temporary account-sync helper probe.
 public struct RemoteAccountConnectivityResult: Equatable, Sendable, Identifiable {
     public let host: String
     public let succeeded: Bool
@@ -161,6 +161,8 @@ public enum RemoteAccountSyncError: LocalizedError, Equatable, Sendable {
     case invalidHost
     case invalidRequest
     case unavailable
+    case helperUnavailable
+    case payloadTooLarge
     case invalidResponse
     case commandFailed(String)
 
@@ -172,8 +174,12 @@ public enum RemoteAccountSyncError: LocalizedError, Equatable, Sendable {
             "The remote account sync request is invalid or unsupported."
         case .unavailable:
             "SSH is unavailable on this Mac."
+        case .helperUnavailable:
+            "The bundled remote account-sync helper is unavailable. Reinstall or update CodexBar."
+        case .payloadTooLarge:
+            "The remote account-sync payload is too large."
         case .invalidResponse:
-            "The remote CodexBar CLI returned an unsupported account sync response."
+            "The remote account-sync helper returned an unsupported response."
         case let .commandFailed(message):
             "Remote account sync failed: \(message)"
         }
@@ -181,8 +187,9 @@ public enum RemoteAccountSyncError: LocalizedError, Equatable, Sendable {
 }
 
 /// Sends account selections to configured SSH hosts without putting secrets in
-/// command-line arguments. The receiving host must have a CodexBar CLI that
-/// supports `account-sync --stdin --json`.
+/// command-line arguments. The packaged account-sync helper is transferred to a
+/// private temporary directory on the receiving host for one operation and then
+/// removed by the remote shell.
 public struct RemoteAccountSynchronizer: Sendable {
     public typealias Runner = @Sendable (
         _ arguments: [String],
@@ -193,31 +200,30 @@ public struct RemoteAccountSynchronizer: Sendable {
     public static let maximumRequestBytes = 64 * 1024
 
     private let runner: Runner
+    private let helperDataProvider: @Sendable () throws -> Data
 
     public init() {
         self.runner = { arguments, environment, requestData in
-            let binary = ["/usr/bin/ssh", "/bin/ssh"].first {
-                FileManager.default.isExecutableFile(atPath: $0)
-            }
-            guard let binary else { throw RemoteAccountSyncError.unavailable }
-
-            let inputPipe = Pipe()
-            inputPipe.fileHandleForWriting.write(requestData)
-            inputPipe.fileHandleForWriting.closeFile()
-            let result = try await SubprocessRunner.run(
-                binary: binary,
+            try await RemoteAccountSyncTransport.runSSH(
                 arguments: arguments,
                 environment: environment,
-                timeout: 60,
-                maxOutputBytes: Self.maximumOutputBytes,
-                standardInput: inputPipe,
-                label: "sync remote provider account")
-            return result.stdout
+                inputData: requestData,
+                options: .init(
+                    timeout: 60,
+                    maxOutputBytes: Self.maximumOutputBytes,
+                    label: "sync remote provider account"))
         }
+        self.helperDataProvider = { try RemoteAccountSyncTransport.bundledHelperData() }
     }
 
     public init(runner: @escaping Runner) {
         self.runner = runner
+        self.helperDataProvider = { Data([0]) }
+    }
+
+    public init(runner: @escaping Runner, helperData: Data) {
+        self.runner = runner
+        self.helperDataProvider = { helperData }
     }
 
     public static func validateHost(_ host: String) throws {
@@ -233,8 +239,8 @@ public struct RemoteAccountSynchronizer: Sendable {
         // Keep OpenSSH's Host/Include/IdentityAgent/IdentityFile/ProxyCommand and
         // ForwardAgent resolution intact. The system ssh client is intentional:
         // SSH libraries generally do not reproduce the user's OpenSSH configuration.
-        let command = "if command -v codexbar >/dev/null 2>&1; then exec codexbar account-sync --stdin --json; " +
-            "else exec /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI account-sync --stdin --json; fi"
+        let command = RemoteAccountSyncTransport.shellQuote(
+            RemoteAccountSyncTransport.remoteCommand(probe: false))
         return [
             "-o", "BatchMode=yes",
             "-o", "StrictHostKeyChecking=yes",
@@ -245,7 +251,7 @@ public struct RemoteAccountSynchronizer: Sendable {
             "-o", "ForwardAgent=no",
             "-o", "ClearAllForwardings=yes",
             "-T", "--", host,
-            "sh", "-lc", "'\(command)'",
+            "sh", "-c", command,
         ]
     }
 
@@ -273,7 +279,22 @@ public struct RemoteAccountSynchronizer: Sendable {
                 RemoteAccountSyncHostResult(
                     host: $0,
                     succeeded: false,
-                    errorDescription: "The account sync request is too large.")
+                    errorDescription: RemoteAccountSyncError.payloadTooLarge.localizedDescription)
+            }
+        }
+
+        let payload: Data
+        do {
+            payload = try RemoteAccountSyncTransport.archive(
+                helperData: self.helperDataProvider(),
+                requestData: requestData)
+        } catch {
+            let description = Self.safeErrorDescription(error)
+            return normalizedHosts.map {
+                RemoteAccountSyncHostResult(
+                    host: $0,
+                    succeeded: false,
+                    errorDescription: description)
             }
         }
 
@@ -291,7 +312,7 @@ public struct RemoteAccountSynchronizer: Sendable {
                 group.addTask {
                     do {
                         let arguments = try Self.arguments(host: host)
-                        let output = try await self.runner(arguments, sshEnvironment, requestData)
+                        let output = try await self.runner(arguments, sshEnvironment, payload)
                         let response = try JSONDecoder().decode(
                             RemoteAccountSyncResponse.self,
                             from: Data(output.utf8))
@@ -344,48 +365,56 @@ public struct RemoteAccountSynchronizer: Sendable {
     }
 }
 
-/// Checks SSH access and the remote CodexBar account-sync capability without
-/// changing any provider account. The remote probe is read-only and never
-/// enters the account-sync receiver.
+/// Checks SSH access and the temporary account-sync helper without changing any
+/// provider account. The remote probe is read-only and never enters the account
+/// mutation path.
 public struct RemoteAccountConnectivityTester: Sendable {
     public typealias Runner = @Sendable (
         _ arguments: [String],
         _ environment: [String: String]) async throws -> String
 
+    public typealias PayloadRunner = @Sendable (
+        _ arguments: [String],
+        _ environment: [String: String],
+        _ standardInput: Data) async throws -> String
+
     public static let maximumOutputBytes = 4 * 1024
 
-    private let runner: Runner
+    private let runner: PayloadRunner
+    private let helperDataProvider: @Sendable () throws -> Data
 
     public init() {
-        self.runner = { arguments, environment in
-            let binary = ["/usr/bin/ssh", "/bin/ssh"].first {
-                FileManager.default.isExecutableFile(atPath: $0)
-            }
-            guard let binary else { throw RemoteAccountSyncError.unavailable }
-            let result = try await SubprocessRunner.run(
-                binary: binary,
+        self.runner = { arguments, environment, payload in
+            try await RemoteAccountSyncTransport.runSSH(
                 arguments: arguments,
                 environment: environment,
-                timeout: 15,
-                maxOutputBytes: Self.maximumOutputBytes,
-                standardInput: FileHandle.nullDevice,
-                label: "test remote account sync connection")
-            return result.stdout
+                inputData: payload,
+                options: .init(
+                    timeout: 15,
+                    maxOutputBytes: Self.maximumOutputBytes,
+                    label: "test remote account sync connection"))
         }
+        self.helperDataProvider = { try RemoteAccountSyncTransport.bundledHelperData() }
     }
 
     public init(runner: @escaping Runner) {
-        self.runner = runner
+        self.runner = { arguments, environment, _ in
+            try await runner(arguments, environment)
+        }
+        self.helperDataProvider = { Data([0]) }
+    }
+
+    public init(payloadRunner: @escaping PayloadRunner, helperData: Data = Data()) {
+        self.runner = payloadRunner
+        self.helperDataProvider = { helperData }
     }
 
     public static func arguments(host: String) throws -> [String] {
         try RemoteAccountSynchronizer.validateHost(host)
         // Keep the user's OpenSSH agent and host configuration intact while the
         // probe remains non-interactive and read-only.
-        let command = "if command -v codexbar >/dev/null 2>&1; then exec codexbar account-sync --probe --json; " +
-            "else if [ -x /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI ]; then " +
-            "exec /Applications/CodexBar.app/Contents/Helpers/CodexBarCLI account-sync --probe --json; " +
-            "else echo CodexBar CLI not found >&2; exit 127; fi; fi"
+        let command = RemoteAccountSyncTransport.shellQuote(
+            RemoteAccountSyncTransport.remoteCommand(probe: true))
         return [
             "-o", "BatchMode=yes",
             "-o", "StrictHostKeyChecking=yes",
@@ -393,8 +422,8 @@ public struct RemoteAccountConnectivityTester: Sendable {
             "-o", "RequestTTY=no",
             "-o", "ForwardAgent=no",
             "-o", "ClearAllForwardings=yes",
-            "-T", "-n", "--", host,
-            "sh", "-lc", "'\(command)'",
+            "-T", "--", host,
+            "sh", "-c", command,
         ]
     }
 
@@ -405,6 +434,21 @@ public struct RemoteAccountConnectivityTester: Sendable {
     {
         let normalizedHosts = RemoteAccountSynchronizer.uniqueHosts(hosts)
         guard !normalizedHosts.isEmpty else { return [] }
+
+        let payload: Data
+        do {
+            payload = try RemoteAccountSyncTransport.archive(
+                helperData: self.helperDataProvider(),
+                requestData: nil)
+        } catch {
+            let description = RemoteAccountSynchronizer.safeErrorDescription(error)
+            return normalizedHosts.map {
+                RemoteAccountConnectivityResult(
+                    host: $0,
+                    succeeded: false,
+                    errorDescription: description)
+            }
+        }
 
         // Preserve variables referenced by the user's ssh_config, including
         // custom IdentityAgent and ProxyCommand variables.
@@ -417,7 +461,7 @@ public struct RemoteAccountConnectivityTester: Sendable {
                 group.addTask {
                     do {
                         let arguments = try Self.arguments(host: host)
-                        let output = try await self.runner(arguments, sshEnvironment)
+                        let output = try await self.runner(arguments, sshEnvironment, payload)
                         let response = try JSONDecoder().decode(
                             RemoteAccountSyncProbeResponse.self,
                             from: Data(output.utf8))
