@@ -189,6 +189,21 @@ public enum RemoteAccountSyncError: LocalizedError, Equatable, Sendable {
     }
 }
 
+private func decodeRemoteAccountSyncJSON<Value: Decodable>(
+    _ type: Value.Type,
+    from output: String) throws -> Value
+{
+    let decoder = JSONDecoder()
+    for rawLine in output.split(whereSeparator: \.isNewline).reversed() {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
+        if let value = try? decoder.decode(type, from: data) {
+            return value
+        }
+    }
+    throw RemoteAccountSyncError.invalidResponse
+}
+
 /// Sends account selections to configured SSH hosts without putting secrets in
 /// command-line arguments. The packaged account-sync helper is transferred to a
 /// private temporary directory on the receiving host for one operation and then
@@ -364,9 +379,9 @@ public struct RemoteAccountSynchronizer: Sendable {
                             requestData: requestData)
                         let arguments = try Self.arguments(host: host)
                         let output = try await self.runner(arguments, sshEnvironment, payload)
-                        let response = try JSONDecoder().decode(
+                        let response = try decodeRemoteAccountSyncJSON(
                             RemoteAccountSyncResponse.self,
-                            from: Data(output.utf8))
+                            from: output)
                         guard response.schemaVersion == RemoteAccountSyncResponse.currentSchemaVersion,
                               response.provider == request.provider,
                               response.status == "applied" || response.status == "noop"
@@ -541,9 +556,9 @@ public struct RemoteAccountConnectivityTester: Sendable {
                             requestData: nil)
                         let arguments = try Self.arguments(host: host)
                         let output = try await self.runner(arguments, sshEnvironment, payload)
-                        let response = try JSONDecoder().decode(
+                        let response = try decodeRemoteAccountSyncJSON(
                             RemoteAccountSyncProbeResponse.self,
-                            from: Data(output.utf8))
+                            from: output)
                         guard response.schemaVersion == RemoteAccountSyncProbeResponse.currentSchemaVersion,
                               response.accountSyncSchemaVersion == RemoteAccountSyncRequest.currentSchemaVersion
                         else {

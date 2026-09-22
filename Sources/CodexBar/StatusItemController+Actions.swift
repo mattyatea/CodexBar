@@ -554,7 +554,13 @@ extension StatusItemController: StatusItemMenuPersistentActionDelegate {
             }
             let syncResults = await self.settings.synchronizeRemoteAccount(
                 .codex(email: account.email, workspaceAccountID: account.effectiveWorkspaceAccountID))
-            let failedHosts = syncResults.filter { !$0.succeeded }.map(\.host)
+            let failedHosts = syncResults.compactMap { result -> String? in
+                guard !result.succeeded else { return nil }
+                guard let errorDescription = result.errorDescription, !errorDescription.isEmpty else {
+                    return result.host
+                }
+                return "\(result.host) — \(errorDescription)"
+            }
             if !failedHosts.isEmpty {
                 self.presentLoginAlert(
                     title: L("Remote account sync failed"),

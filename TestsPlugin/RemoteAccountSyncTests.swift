@@ -129,7 +129,7 @@ struct RemoteAccountSyncTests {
                 provider: "codex",
                 detail: "Codex system account selected")
             let responseData = try JSONEncoder().encode(response)
-            return String(decoding: responseData, as: UTF8.self)
+            return "shell startup noise\n" + String(decoding: responseData, as: UTF8.self) + "\n"
         }
 
         let results = await synchronizer.synchronize(
@@ -196,7 +196,8 @@ struct RemoteAccountSyncTests {
         let tester = RemoteAccountConnectivityTester { _, _ in
             let response = RemoteAccountSyncProbeResponse(cliVersion: "0.63.1")
             let data = try! JSONEncoder().encode(response)
-            return String(decoding: data, as: UTF8.self)
+            return "DBUS_SESSION_BUS_ADDRESS='unix:path=/run/user/1000/bus'\n"
+                + String(decoding: data, as: UTF8.self)
         }
 
         let results = await tester.check(hosts: ["remote.example", "remote.example"])
