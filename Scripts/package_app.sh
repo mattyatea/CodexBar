@@ -548,6 +548,44 @@ strip_release_binary "$APP/Contents/MacOS/CodexBar"
 # Ship CodexBarCLI alongside the app for easy symlinking.
 install_binary "CodexBarCLI" "$APP/Contents/Helpers/CodexBarCLI"
 strip_release_binary "$APP/Contents/Helpers/CodexBarCLI"
+
+# Optional Linux receiver helpers for SSH account synchronization. They are
+# built by the Linux CLI workflow because a macOS Swift toolchain cannot produce
+# the Linux executable locally. The directory is intentionally optional so a
+# normal macOS package remains buildable without a Linux toolchain.
+install_remote_account_sync_helpers() {
+  local source_dir="${CODEXBAR_REMOTE_ACCOUNT_SYNC_HELPERS_DIR:-}"
+  if [[ -z "$source_dir" ]]; then
+    return 0
+  fi
+  if [[ ! -d "$source_dir" ]]; then
+    echo "ERROR: CODEXBAR_REMOTE_ACCOUNT_SYNC_HELPERS_DIR is not a directory: $source_dir" >&2
+    return 1
+  fi
+
+  local destination="$APP/Contents/Resources/RemoteAccountSync"
+  local copied=0
+  for target in linux-x86_64 linux-aarch64; do
+    local source="$source_dir/$target/CodexBarCLI"
+    if [[ ! -f "$source" ]]; then
+      echo "WARN: Missing optional remote account-sync helper: $source" >&2
+      continue
+    fi
+    if [[ ! -x "$source" ]]; then
+      echo "ERROR: Remote account-sync helper is not executable: $source" >&2
+      return 1
+    fi
+    mkdir -p "$destination/$target"
+    install -m 0755 "$source" "$destination/$target/CodexBarCLI"
+    copied=$((copied + 1))
+  done
+
+  if [[ "$copied" == 0 ]]; then
+    echo "ERROR: No Linux remote account-sync helpers were found in $source_dir" >&2
+    return 1
+  fi
+}
+install_remote_account_sync_helpers
 # Watchdog helper: ensures `claude` probes die when CodexBar crashes/gets killed.
 install_binary "CodexBarClaudeWatchdog" "$APP/Contents/Helpers/CodexBarClaudeWatchdog"
 strip_release_binary "$APP/Contents/Helpers/CodexBarClaudeWatchdog"

@@ -41,6 +41,71 @@ struct RemoteAccountSyncTests {
     }
 
     @Test
+    func `remote target normalizes operating system and architecture aliases`() throws {
+        let linuxAMD64 = try RemoteAccountSyncTarget(os: "Linux", architecture: "amd64")
+        #expect(linuxAMD64.operatingSystem == .linux)
+        #expect(linuxAMD64.architecture == .x86_64)
+        #expect(linuxAMD64.helperKey == "linux-x86_64")
+        #expect(linuxAMD64.displayName == "Linux x86_64")
+
+        let macARM = try RemoteAccountSyncTarget(os: "Darwin", architecture: "arm64")
+        #expect(macARM.operatingSystem == .macOS)
+        #expect(macARM.architecture == .arm64)
+        #expect(macARM.helperKey == "macos-universal")
+
+        #expect(throws: RemoteAccountSyncError.unsupportedRemoteTarget("FreeBSD sparc64")) {
+            try RemoteAccountSyncTarget(os: "FreeBSD", architecture: "sparc64")
+        }
+    }
+
+    @Test
+    func `platform probe output ignores login noise and selects the last marker`() throws {
+        let target = try RemoteAccountSyncTransport.target(
+            fromProbeOutput: "welcome\ncodexbar-remote-target:Linux:amd64\n")
+
+        #expect(target.operatingSystem == .linux)
+        #expect(target.architecture == .x86_64)
+        #expect(target.helperKey == "linux-x86_64")
+    }
+
+    @Test
+    func `platform arguments use the same OpenSSH configuration`() throws {
+        let arguments = try RemoteAccountSynchronizer.platformArguments(host: "builder@example.com")
+
+        #expect(arguments.contains("BatchMode=yes"))
+        #expect(arguments.contains("StrictHostKeyChecking=yes"))
+        #expect(arguments.contains("ForwardAgent=no"))
+        #expect(arguments.contains("ClearAllForwardings=yes"))
+        #expect(arguments.contains("-T"))
+        #expect((arguments.last ?? "").contains("uname -s"))
+        #expect((arguments.last ?? "").contains("codexbar-remote-target"))
+    }
+
+    @Test
+    func `target helper override resolves from the platform directory`() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codexbar-account-sync-helper-test-" + UUID().uuidString)
+        let helper = root
+            .appendingPathComponent("linux-x86_64", isDirectory: true)
+            .appendingPathComponent("CodexBarCLI")
+        try FileManager.default.createDirectory(
+            at: helper.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("helper".utf8).write(to: helper)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o700)],
+            ofItemAtPath: helper.path)
+
+        let target = try RemoteAccountSyncTarget(os: "Linux", architecture: "x86_64")
+        let resolved = RemoteAccountSyncTransport.bundledHelperURL(
+            for: target,
+            environment: ["CODEXBAR_REMOTE_ACCOUNT_SYNC_HELPERS_DIR": root.path])
+
+        #expect(resolved?.standardizedFileURL == helper.standardizedFileURL)
+    }
+
+    @Test
     func `host validation rejects shell input`() {
         #expect(throws: RemoteAccountSyncError.invalidHost) {
             try RemoteAccountSynchronizer.validateHost("builder; touch /tmp/pwned")
@@ -63,6 +128,35 @@ struct RemoteAccountSyncTests {
 
         let results = await synchronizer.synchronize(
             hosts: ["remote.example", "remote.example"],
+            request: RemoteAccountSyncRequest(
+                provider: "codex",
+                selection: .codex(email: "person@example.com", workspaceAccountID: nil)))
+
+        #expect(results == [RemoteAccountSyncHostResult(host: "remote.example", succeeded: true)])
+    }
+
+    @Test
+    func `synchronizer selects a helper after probing each remote target`() async {
+        let synchronizer = RemoteAccountSynchronizer(
+            runner: { _, _, payload in
+                #expect(payload.contains(0xA5))
+                let response = RemoteAccountSyncResponse(
+                    status: "applied",
+                    provider: "codex",
+                    detail: "Codex system account selected")
+                let responseData = try JSONEncoder().encode(response)
+                return String(decoding: responseData, as: UTF8.self)
+            },
+            platformRunner: { _, _ in
+                "login message\ncodexbar-remote-target:Linux:amd64\n"
+            },
+            helperDataProvider: { target, _ in
+                #expect(target?.helperKey == "linux-x86_64")
+                return Data([0xA5])
+            })
+
+        let results = await synchronizer.synchronize(
+            hosts: ["remote.example"],
             request: RemoteAccountSyncRequest(
                 provider: "codex",
                 selection: .codex(email: "person@example.com", workspaceAccountID: nil)))

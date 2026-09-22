@@ -1,5 +1,66 @@
 import Foundation
 
+/// The platform of the SSH host that will execute the temporary receiver.
+///
+/// The app itself is normally a macOS universal binary, but a Mach-O executable
+/// cannot run on Linux. Keep this target deliberately small and map aliases from
+/// `uname` to the names used by the bundled helper directory.
+package struct RemoteAccountSyncTarget: Equatable, Sendable {
+    package enum OperatingSystem: String, Sendable {
+        case macOS
+        case linux
+    }
+
+    package enum Architecture: String, Sendable {
+        case arm64
+        case x86_64
+    }
+
+    package let operatingSystem: OperatingSystem
+    package let architecture: Architecture
+
+    package init(os: String, architecture: String) throws {
+        let normalizedOS = os.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedArchitecture = architecture
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch normalizedOS {
+        case "darwin", "macos":
+            self.operatingSystem = .macOS
+        case "linux":
+            self.operatingSystem = .linux
+        default:
+            throw RemoteAccountSyncError.unsupportedRemoteTarget("\(os) \(architecture)")
+        }
+
+        switch normalizedArchitecture {
+        case "arm64", "aarch64", "armv8l":
+            self.architecture = .arm64
+        case "x86_64", "amd64":
+            self.architecture = .x86_64
+        default:
+            throw RemoteAccountSyncError.unsupportedRemoteTarget("\(os) \(architecture)")
+        }
+    }
+
+    package var helperKey: String {
+        switch self.operatingSystem {
+        case .macOS:
+            // The app helper is universal, so one copy serves both macOS slices.
+            "macos-universal"
+        case .linux:
+            "linux-\(self.architecture.rawValue == "arm64" ? "aarch64" : "x86_64")"
+        }
+    }
+
+    package var displayName: String {
+        let os = self.operatingSystem == .macOS ? "macOS" : "Linux"
+        let architecture = self.architecture == .arm64 ? "arm64" : "x86_64"
+        return "\(os) \(architecture)"
+    }
+}
+
 /// The small, self-contained payload sent to an SSH host for one account-sync operation.
 ///
 /// The packaged helper does not need CodexBarCore's resource bundle for `account-sync`, so the
@@ -22,9 +83,10 @@ package enum RemoteAccountSyncTransport {
     package static let maximumPayloadBytes = 96 * 1024 * 1024
 
     package static func bundledHelperData(
+        for target: RemoteAccountSyncTarget? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment) throws -> Data
     {
-        guard let url = self.bundledHelperURL(environment: environment) else {
+        guard let url = self.bundledHelperURL(for: target, environment: environment) else {
             throw RemoteAccountSyncError.helperUnavailable
         }
         do {
@@ -41,14 +103,38 @@ package enum RemoteAccountSyncTransport {
     }
 
     package static func bundledHelperURL(
+        for target: RemoteAccountSyncTarget? = nil,
         bundle: Bundle = .main,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default) -> URL?
     {
         var candidates: [URL] = []
-        if let override = environment["CODEXBAR_REMOTE_ACCOUNT_SYNC_HELPER"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !override.isEmpty
+        if let target {
+            let targetEnvironmentKey = "CODEXBAR_REMOTE_ACCOUNT_SYNC_HELPER_" + target.helperKey
+                .uppercased()
+                .replacingOccurrences(of: "-", with: "_")
+            if let override = environment[targetEnvironmentKey]?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !override.isEmpty
+            {
+                candidates.append(URL(fileURLWithPath: override))
+            }
+
+            if let root = environment["CODEXBAR_REMOTE_ACCOUNT_SYNC_HELPERS_DIR"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !root.isEmpty
+            {
+                candidates.append(
+                    URL(fileURLWithPath: root)
+                        .appendingPathComponent(target.helperKey, isDirectory: true)
+                        .appendingPathComponent("CodexBarCLI"))
+            }
+        }
+
+        if target == nil || target?.operatingSystem == .macOS,
+           let override = environment["CODEXBAR_REMOTE_ACCOUNT_SYNC_HELPER"]?
+               .trimmingCharacters(in: .whitespacesAndNewlines),
+               !override.isEmpty
         {
             candidates.append(URL(fileURLWithPath: override))
         }
@@ -56,19 +142,52 @@ package enum RemoteAccountSyncTransport {
         let helperName = "CodexBarCLI"
         let bundleURL = bundle.bundleURL
         if bundleURL.pathExtension == "app" {
-            candidates.append(
-                bundleURL
-                    .appendingPathComponent("Contents", isDirectory: true)
-                    .appendingPathComponent("Helpers", isDirectory: true)
-                    .appendingPathComponent(helperName))
+            let contentsURL = bundleURL.appendingPathComponent("Contents", isDirectory: true)
+            if let target {
+                candidates.append(
+                    contentsURL
+                        .appendingPathComponent("Resources", isDirectory: true)
+                        .appendingPathComponent("RemoteAccountSync", isDirectory: true)
+                        .appendingPathComponent(target.helperKey, isDirectory: true)
+                        .appendingPathComponent(helperName))
+                candidates.append(
+                    contentsURL
+                        .appendingPathComponent("Helpers", isDirectory: true)
+                        .appendingPathComponent("RemoteAccountSync", isDirectory: true)
+                        .appendingPathComponent(target.helperKey, isDirectory: true)
+                        .appendingPathComponent(helperName))
+            }
+            if target == nil || target?.operatingSystem == .macOS {
+                candidates.append(
+                    contentsURL
+                        .appendingPathComponent("Helpers", isDirectory: true)
+                        .appendingPathComponent(helperName))
+            }
         }
         if let executableURL = bundle.executableURL {
-            candidates.append(
-                executableURL
-                    .deletingLastPathComponent()
-                    .deletingLastPathComponent()
-                    .appendingPathComponent("Helpers", isDirectory: true)
-                    .appendingPathComponent(helperName))
+            let contentsURL = executableURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+            if let target {
+                candidates.append(
+                    contentsURL
+                        .appendingPathComponent("Resources", isDirectory: true)
+                        .appendingPathComponent("RemoteAccountSync", isDirectory: true)
+                        .appendingPathComponent(target.helperKey, isDirectory: true)
+                        .appendingPathComponent(helperName))
+                candidates.append(
+                    contentsURL
+                        .appendingPathComponent("Helpers", isDirectory: true)
+                        .appendingPathComponent("RemoteAccountSync", isDirectory: true)
+                        .appendingPathComponent(target.helperKey, isDirectory: true)
+                        .appendingPathComponent(helperName))
+            }
+            if target == nil || target?.operatingSystem == .macOS {
+                candidates.append(
+                    contentsURL
+                        .appendingPathComponent("Helpers", isDirectory: true)
+                        .appendingPathComponent(helperName))
+            }
         }
 
         var seen: Set<String> = []
@@ -77,6 +196,28 @@ package enum RemoteAccountSyncTransport {
             guard seen.insert(normalized).inserted else { return false }
             return fileManager.isExecutableFile(atPath: normalized)
         }
+    }
+
+    package static func target(fromProbeOutput output: String) throws -> RemoteAccountSyncTarget {
+        let prefix = "codexbar-remote-target:"
+        for line in output.split(whereSeparator: \.isNewline).reversed() {
+            guard line.hasPrefix(prefix) else { continue }
+            let values = line.dropFirst(prefix.count).split(separator: ":", maxSplits: 1)
+            guard values.count == 2 else { continue }
+            return try RemoteAccountSyncTarget(
+                os: String(values[0]),
+                architecture: String(values[1]))
+        }
+        throw RemoteAccountSyncError.invalidResponse
+    }
+
+    package static func platformProbeCommand() -> String {
+        [
+            "set -eu",
+            "os=\"$(uname -s 2>/dev/null || printf unknown)\"",
+            "architecture=\"$(uname -m 2>/dev/null || printf unknown)\"",
+            "printf 'codexbar-remote-target:%s:%s\\n' \"$os\" \"$architecture\"",
+        ].joined(separator: "; ")
     }
 
     package static func archive(helperData: Data, requestData: Data?) throws -> Data {

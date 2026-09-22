@@ -162,6 +162,7 @@ public enum RemoteAccountSyncError: LocalizedError, Equatable, Sendable {
     case invalidRequest
     case unavailable
     case helperUnavailable
+    case unsupportedRemoteTarget(String)
     case payloadTooLarge
     case invalidResponse
     case commandFailed(String)
@@ -175,7 +176,9 @@ public enum RemoteAccountSyncError: LocalizedError, Equatable, Sendable {
         case .unavailable:
             "SSH is unavailable on this Mac."
         case .helperUnavailable:
-            "The bundled remote account-sync helper is unavailable. Reinstall or update CodexBar."
+            "A compatible remote account-sync helper is not bundled for this host. Reinstall or update CodexBar."
+        case let .unsupportedRemoteTarget(target):
+            "Remote account sync does not support the remote platform \(target)."
         case .payloadTooLarge:
             "The remote account-sync payload is too large."
         case .invalidResponse:
@@ -196,11 +199,18 @@ public struct RemoteAccountSynchronizer: Sendable {
         _ environment: [String: String],
         _ standardInput: Data) async throws -> String
 
+    package typealias PlatformRunner = @Sendable (
+        _ arguments: [String],
+        _ environment: [String: String]) async throws -> String
+
     public static let maximumOutputBytes = 16 * 1024
     public static let maximumRequestBytes = 64 * 1024
 
     private let runner: Runner
-    private let helperDataProvider: @Sendable () throws -> Data
+    private let platformRunner: PlatformRunner?
+    private let helperDataProvider: @Sendable (
+        _ target: RemoteAccountSyncTarget?,
+        _ environment: [String: String]) throws -> Data
 
     public init() {
         self.runner = { arguments, environment, requestData in
@@ -213,17 +223,45 @@ public struct RemoteAccountSynchronizer: Sendable {
                     maxOutputBytes: Self.maximumOutputBytes,
                     label: "sync remote provider account"))
         }
-        self.helperDataProvider = { try RemoteAccountSyncTransport.bundledHelperData() }
+        self.platformRunner = { arguments, environment in
+            try await RemoteAccountSyncTransport.runSSH(
+                arguments: arguments,
+                environment: environment,
+                inputData: Data(),
+                options: .init(
+                    timeout: 15,
+                    maxOutputBytes: 4 * 1024,
+                    label: "detect remote account sync platform"))
+        }
+        self.helperDataProvider = { target, environment in
+            try RemoteAccountSyncTransport.bundledHelperData(
+                for: target,
+                environment: environment)
+        }
     }
 
     public init(runner: @escaping Runner) {
         self.runner = runner
-        self.helperDataProvider = { Data([0]) }
+        self.platformRunner = nil
+        self.helperDataProvider = { _, _ in Data([0]) }
     }
 
     public init(runner: @escaping Runner, helperData: Data) {
         self.runner = runner
-        self.helperDataProvider = { helperData }
+        self.platformRunner = nil
+        self.helperDataProvider = { _, _ in helperData }
+    }
+
+    package init(
+        runner: @escaping Runner,
+        platformRunner: @escaping PlatformRunner,
+        helperDataProvider: @escaping @Sendable (
+            _ target: RemoteAccountSyncTarget?,
+            _ environment: [String: String]) throws -> Data)
+    {
+        self.runner = runner
+        self.platformRunner = platformRunner
+        self.helperDataProvider = helperDataProvider
     }
 
     public static func validateHost(_ host: String) throws {
@@ -248,6 +286,22 @@ public struct RemoteAccountSynchronizer: Sendable {
             "-o", "RequestTTY=no",
             // This only disables forwarding the local agent into the remote
             // session; it does not disable using IdentityAgent for SSH auth.
+            "-o", "ForwardAgent=no",
+            "-o", "ClearAllForwardings=yes",
+            "-T", "--", host,
+            "sh", "-c", command,
+        ]
+    }
+
+    package static func platformArguments(host: String) throws -> [String] {
+        try self.validateHost(host)
+        let command = RemoteAccountSyncTransport.shellQuote(
+            RemoteAccountSyncTransport.platformProbeCommand())
+        return [
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", "RemoteCommand=none",
+            "-o", "RequestTTY=no",
             "-o", "ForwardAgent=no",
             "-o", "ClearAllForwardings=yes",
             "-T", "--", host,
@@ -283,21 +337,6 @@ public struct RemoteAccountSynchronizer: Sendable {
             }
         }
 
-        let payload: Data
-        do {
-            payload = try RemoteAccountSyncTransport.archive(
-                helperData: self.helperDataProvider(),
-                requestData: requestData)
-        } catch {
-            let description = Self.safeErrorDescription(error)
-            return normalizedHosts.map {
-                RemoteAccountSyncHostResult(
-                    host: $0,
-                    succeeded: false,
-                    errorDescription: description)
-            }
-        }
-
         // ssh_config supports arbitrary environment expansion in IdentityAgent,
         // IdentityFile, ProxyCommand, Match exec, and related directives. Pass
         // the caller's environment through unchanged; this does not transmit
@@ -311,6 +350,18 @@ public struct RemoteAccountSynchronizer: Sendable {
             for host in normalizedHosts {
                 group.addTask {
                     do {
+                        let target: RemoteAccountSyncTarget?
+                        if let platformRunner = self.platformRunner {
+                            let probeOutput = try await platformRunner(
+                                Self.platformArguments(host: host),
+                                sshEnvironment)
+                            target = try RemoteAccountSyncTransport.target(fromProbeOutput: probeOutput)
+                        } else {
+                            target = nil
+                        }
+                        let payload = try RemoteAccountSyncTransport.archive(
+                            helperData: self.helperDataProvider(target, sshEnvironment),
+                            requestData: requestData)
                         let arguments = try Self.arguments(host: host)
                         let output = try await self.runner(arguments, sshEnvironment, payload)
                         let response = try JSONDecoder().decode(
@@ -381,7 +432,10 @@ public struct RemoteAccountConnectivityTester: Sendable {
     public static let maximumOutputBytes = 4 * 1024
 
     private let runner: PayloadRunner
-    private let helperDataProvider: @Sendable () throws -> Data
+    private let platformRunner: RemoteAccountSynchronizer.PlatformRunner?
+    private let helperDataProvider: @Sendable (
+        _ target: RemoteAccountSyncTarget?,
+        _ environment: [String: String]) throws -> Data
 
     public init() {
         self.runner = { arguments, environment, payload in
@@ -394,19 +448,47 @@ public struct RemoteAccountConnectivityTester: Sendable {
                     maxOutputBytes: Self.maximumOutputBytes,
                     label: "test remote account sync connection"))
         }
-        self.helperDataProvider = { try RemoteAccountSyncTransport.bundledHelperData() }
+        self.platformRunner = { arguments, environment in
+            try await RemoteAccountSyncTransport.runSSH(
+                arguments: arguments,
+                environment: environment,
+                inputData: Data(),
+                options: .init(
+                    timeout: 15,
+                    maxOutputBytes: Self.maximumOutputBytes,
+                    label: "detect remote account sync platform"))
+        }
+        self.helperDataProvider = { target, environment in
+            try RemoteAccountSyncTransport.bundledHelperData(
+                for: target,
+                environment: environment)
+        }
     }
 
     public init(runner: @escaping Runner) {
         self.runner = { arguments, environment, _ in
             try await runner(arguments, environment)
         }
-        self.helperDataProvider = { Data([0]) }
+        self.platformRunner = nil
+        self.helperDataProvider = { _, _ in Data([0]) }
     }
 
     public init(payloadRunner: @escaping PayloadRunner, helperData: Data = Data()) {
         self.runner = payloadRunner
-        self.helperDataProvider = { helperData }
+        self.platformRunner = nil
+        self.helperDataProvider = { _, _ in helperData }
+    }
+
+    package init(
+        payloadRunner: @escaping PayloadRunner,
+        platformRunner: @escaping RemoteAccountSynchronizer.PlatformRunner,
+        helperDataProvider: @escaping @Sendable (
+            _ target: RemoteAccountSyncTarget?,
+            _ environment: [String: String]) throws -> Data)
+    {
+        self.runner = payloadRunner
+        self.platformRunner = platformRunner
+        self.helperDataProvider = helperDataProvider
     }
 
     public static func arguments(host: String) throws -> [String] {
@@ -435,21 +517,6 @@ public struct RemoteAccountConnectivityTester: Sendable {
         let normalizedHosts = RemoteAccountSynchronizer.uniqueHosts(hosts)
         guard !normalizedHosts.isEmpty else { return [] }
 
-        let payload: Data
-        do {
-            payload = try RemoteAccountSyncTransport.archive(
-                helperData: self.helperDataProvider(),
-                requestData: nil)
-        } catch {
-            let description = RemoteAccountSynchronizer.safeErrorDescription(error)
-            return normalizedHosts.map {
-                RemoteAccountConnectivityResult(
-                    host: $0,
-                    succeeded: false,
-                    errorDescription: description)
-            }
-        }
-
         // Preserve variables referenced by the user's ssh_config, including
         // custom IdentityAgent and ProxyCommand variables.
         let sshEnvironment = environment
@@ -460,6 +527,18 @@ public struct RemoteAccountConnectivityTester: Sendable {
             for host in normalizedHosts {
                 group.addTask {
                     do {
+                        let target: RemoteAccountSyncTarget?
+                        if let platformRunner = self.platformRunner {
+                            let probeOutput = try await platformRunner(
+                                RemoteAccountSynchronizer.platformArguments(host: host),
+                                sshEnvironment)
+                            target = try RemoteAccountSyncTransport.target(fromProbeOutput: probeOutput)
+                        } else {
+                            target = nil
+                        }
+                        let payload = try RemoteAccountSyncTransport.archive(
+                            helperData: self.helperDataProvider(target, sshEnvironment),
+                            requestData: nil)
                         let arguments = try Self.arguments(host: host)
                         let output = try await self.runner(arguments, sshEnvironment, payload)
                         let response = try JSONDecoder().decode(
@@ -470,13 +549,14 @@ public struct RemoteAccountConnectivityTester: Sendable {
                         else {
                             throw RemoteAccountSyncError.invalidResponse
                         }
+                        let platformDetail = target.map { " · \($0.displayName)" } ?? ""
                         let detail = response.cliVersion.map {
                             "\($0) · account-sync v\(response.accountSyncSchemaVersion)"
                         } ?? "account-sync v\(response.accountSyncSchemaVersion)"
                         return RemoteAccountConnectivityResult(
                             host: host,
                             succeeded: true,
-                            detail: detail)
+                            detail: detail + platformDetail)
                     } catch is CancellationError {
                         return RemoteAccountConnectivityResult(
                             host: host,
