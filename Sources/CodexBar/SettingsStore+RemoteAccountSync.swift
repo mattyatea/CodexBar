@@ -3,10 +3,40 @@ import Foundation
 
 extension SettingsStore {
     var remoteAccountSyncHostList: [String] {
-        self.remoteAccountSyncHosts
+        var seen: Set<String> = []
+        return self.remoteAccountSyncHosts
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    func setRemoteAccountSyncHost(_ host: String, selected: Bool) {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        var hosts = self.remoteAccountSyncHostList
+        if selected {
+            guard !hosts.contains(normalized) else { return }
+            hosts.append(normalized)
+        } else {
+            hosts.removeAll { $0 == normalized }
+        }
+        self.remoteAccountSyncHosts = hosts.joined(separator: ", ")
+    }
+
+    @discardableResult
+    func addRemoteAccountSyncHost(_ host: String) -> Bool {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              (try? RemoteAccountSynchronizer.validateHost(normalized)) != nil,
+              !self.remoteAccountSyncHostList.contains(normalized)
+        else { return false }
+        self.setRemoteAccountSyncHost(normalized, selected: true)
+        return true
+    }
+
+    func removeRemoteAccountSyncHost(_ host: String) {
+        self.setRemoteAccountSyncHost(host, selected: false)
     }
 
     func synchronizeRemoteAccount(_ selection: RemoteAccountSyncSelection) async -> [RemoteAccountSyncHostResult] {

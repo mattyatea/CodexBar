@@ -123,6 +123,11 @@ struct MenuPane: View {
 @MainActor
 struct RemoteAccountSyncSettingsSection: View {
     @Bindable var settings: SettingsStore
+    @State private var discoveredSSHHosts: [RemoteSSHHost] = []
+    @State private var isLoadingSSHConfig = false
+    @State private var sshConfigError: String?
+    @State private var manualHost = ""
+    @State private var manualHostError: String?
 
     var body: some View {
         Section {
@@ -132,22 +137,150 @@ struct RemoteAccountSyncSettingsSection: View {
                     subtitle: L("remote_account_sync_subtitle"))
             }
 
-            LabeledContent(L("remote_account_sync_hosts_title")) {
-                TextField(
-                    L("remote_account_sync_hosts_title"),
-                    text: self.$settings.remoteAccountSyncHosts,
-                    prompt: Text(verbatim: "user@host, user@host"))
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 220, idealWidth: 280)
-                    .accessibilityLabel(L("remote_account_sync_hosts_title"))
+            if self.settings.remoteAccountSyncEnabled {
+                self.hostSelection
             }
-            .disabled(!self.settings.remoteAccountSyncEnabled)
         } header: {
             Text(L("remote_account_sync_title"))
         } footer: {
             SettingsSectionFooter(L("remote_account_sync_footer"))
         }
+        .task(id: self.settings.remoteAccountSyncEnabled) {
+            guard self.settings.remoteAccountSyncEnabled else { return }
+            self.reloadSSHConfig()
+        }
+    }
+
+    @ViewBuilder
+    private var hostSelection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(L("remote_account_sync_config_hosts_title"))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button {
+                    self.reloadSSHConfig()
+                } label: {
+                    if self.isLoadingSSHConfig {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label(L("Refresh"), systemImage: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(self.isLoadingSSHConfig)
+                .help(L("remote_account_sync_refresh_config_help"))
+            }
+
+            if self.isLoadingSSHConfig, self.discoveredSSHHosts.isEmpty {
+                ProgressView(L("remote_account_sync_loading_config"))
+                    .controlSize(.small)
+            } else if self.discoveredSSHHosts.isEmpty {
+                Text(self.sshConfigError ?? L("remote_account_sync_no_config_hosts"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(self.discoveredSSHHosts) { host in
+                    Toggle(
+                        isOn: self.hostSelectionBinding(for: host.alias))
+                    {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(host.displayName)
+                            if let detail = self.hostDetail(host), !detail.isEmpty {
+                                Text(detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+        }
+
+        if !self.manualHosts.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L("remote_account_sync_manual_hosts_title"))
+                    .font(.subheadline.weight(.semibold))
+                ForEach(self.manualHosts, id: \.self) { host in
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                        Text(host)
+                            .textSelection(.enabled)
+                        Spacer()
+                        Button(L("remove"), role: .destructive) {
+                            self.settings.removeRemoteAccountSyncHost(host)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+        }
+
+        VStack(alignment: .leading, spacing: 5) {
+            Text(L("remote_account_sync_manual_add_title"))
+                .font(.subheadline.weight(.semibold))
+            HStack {
+                TextField(
+                    L("remote_account_sync_manual_host_placeholder"),
+                    text: self.$manualHost,
+                    prompt: Text(verbatim: "alias or user@host"))
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { self.addManualHost() }
+                Button(L("Add")) { self.addManualHost() }
+                    .disabled(self.manualHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if let manualHostError = self.manualHostError {
+                Text(manualHostError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .disabled(!self.settings.remoteAccountSyncEnabled)
+    }
+
+    private var manualHosts: [String] {
+        let discovered = Set(self.discoveredSSHHosts.map(\.alias))
+        return self.settings.remoteAccountSyncHostList.filter { !discovered.contains($0) }
+    }
+
+    private func hostSelectionBinding(for alias: String) -> Binding<Bool> {
+        Binding(
+            get: { self.settings.remoteAccountSyncHostList.contains(alias) },
+            set: { self.settings.setRemoteAccountSyncHost(alias, selected: $0) })
+    }
+
+    private func hostDetail(_ host: RemoteSSHHost) -> String? {
+        var values: [String] = []
+        if let user = host.user { values.append(user) }
+        if let hostname = host.hostname { values.append(hostname) }
+        if let port = host.port { values.append("port \(port)") }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    private func reloadSSHConfig() {
+        guard !self.isLoadingSSHConfig else { return }
+        self.isLoadingSSHConfig = true
+        self.sshConfigError = nil
+        defer { self.isLoadingSSHConfig = false }
+        do {
+            self.discoveredSSHHosts = try RemoteSSHConfig.hosts()
+        } catch {
+            self.discoveredSSHHosts = []
+            self.sshConfigError = L("remote_account_sync_config_read_failed")
+        }
+    }
+
+    private func addManualHost() {
+        let candidate = self.manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else { return }
+        guard self.settings.addRemoteAccountSyncHost(candidate) else {
+            self.manualHostError = L("remote_account_sync_invalid_host")
+            return
+        }
+        self.manualHost = ""
+        self.manualHostError = nil
     }
 }
 
