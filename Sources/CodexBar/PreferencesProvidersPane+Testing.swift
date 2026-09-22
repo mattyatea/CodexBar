@@ -88,6 +88,10 @@ extension ProvidersPane {
     func _test_requestCodexSystemVisibleAccount(id: String) async {
         await self.requestCodexSystemVisibleAccount(id: id)
     }
+
+    func _test_retryCodexRemoteAccountSync() async {
+        await self.retryCodexRemoteAccountSync()
+    }
 }
 
 @MainActor

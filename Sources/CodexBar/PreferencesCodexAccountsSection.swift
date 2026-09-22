@@ -32,6 +32,36 @@ struct CodexAccountsSectionState: Equatable {
     let isAuthenticatingLiveAccount: Bool
     let isPromotingSystemAccount: Bool
     let notice: CodexAccountsSectionNotice?
+    let canRetryRemoteAccountSync: Bool
+    let isRetryingRemoteAccountSync: Bool
+
+    init(
+        visibleAccounts: [CodexVisibleAccount],
+        activeVisibleAccountID: String?,
+        liveVisibleAccountID: String?,
+        hasUnreadableManagedAccountStore: Bool,
+        isAuthenticatingManagedAccount: Bool,
+        authenticatingManagedAccountID: UUID?,
+        isRemovingManagedAccount: Bool,
+        isAuthenticatingLiveAccount: Bool,
+        isPromotingSystemAccount: Bool,
+        notice: CodexAccountsSectionNotice?,
+        canRetryRemoteAccountSync: Bool = false,
+        isRetryingRemoteAccountSync: Bool = false)
+    {
+        self.visibleAccounts = visibleAccounts
+        self.activeVisibleAccountID = activeVisibleAccountID
+        self.liveVisibleAccountID = liveVisibleAccountID
+        self.hasUnreadableManagedAccountStore = hasUnreadableManagedAccountStore
+        self.isAuthenticatingManagedAccount = isAuthenticatingManagedAccount
+        self.authenticatingManagedAccountID = authenticatingManagedAccountID
+        self.isRemovingManagedAccount = isRemovingManagedAccount
+        self.isAuthenticatingLiveAccount = isAuthenticatingLiveAccount
+        self.isPromotingSystemAccount = isPromotingSystemAccount
+        self.notice = notice
+        self.canRetryRemoteAccountSync = canRetryRemoteAccountSync
+        self.isRetryingRemoteAccountSync = isRetryingRemoteAccountSync
+    }
 
     var showsActivePicker: Bool {
         self.visibleAccounts.count > 1
@@ -60,7 +90,8 @@ struct CodexAccountsSectionState: Equatable {
 
     private var hasAccountOperationInFlight: Bool {
         self.isAuthenticatingManagedAccount || self.isRemovingManagedAccount ||
-            self.isAuthenticatingLiveAccount || self.isPromotingSystemAccount
+            self.isAuthenticatingLiveAccount || self.isPromotingSystemAccount ||
+            self.isRetryingRemoteAccountSync
     }
 
     var addAccountTitle: String {
@@ -122,6 +153,25 @@ struct CodexAccountsSectionView: View {
     let removeAccount: (CodexVisibleAccount) -> Void
     let requestSystemVisibleAccount: (String) -> Void
     let addAccount: () -> Void
+    let retryRemoteAccountSync: (() -> Void)?
+
+    init(
+        state: CodexAccountsSectionState,
+        setActiveVisibleAccount: @escaping (String) -> Void,
+        reauthenticateAccount: @escaping (CodexVisibleAccount) -> Void,
+        removeAccount: @escaping (CodexVisibleAccount) -> Void,
+        requestSystemVisibleAccount: @escaping (String) -> Void,
+        addAccount: @escaping () -> Void,
+        retryRemoteAccountSync: (() -> Void)? = nil)
+    {
+        self.state = state
+        self.setActiveVisibleAccount = setActiveVisibleAccount
+        self.reauthenticateAccount = reauthenticateAccount
+        self.removeAccount = removeAccount
+        self.requestSystemVisibleAccount = requestSystemVisibleAccount
+        self.addAccount = addAccount
+        self.retryRemoteAccountSync = retryRemoteAccountSync
+    }
 
     var body: some View {
         Section {
@@ -192,10 +242,28 @@ struct CodexAccountsSectionView: View {
             }
 
             if let notice = self.state.notice {
-                Text(notice.text)
-                    .font(.footnote)
-                    .foregroundStyle(notice.tone == .warning ? .red : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(notice.text)
+                        .font(.footnote)
+                        .foregroundStyle(notice.tone == .warning ? .red : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if self.state.canRetryRemoteAccountSync {
+                        Button {
+                            self.retryRemoteAccountSync?()
+                        } label: {
+                            if self.state.isRetryingRemoteAccountSync {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Label(L("codex_workspaces_retry"), systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .disabled(self.state.isRetryingRemoteAccountSync)
+                    }
+                }
             }
 
             Button(self.state.addAccountTitle) {

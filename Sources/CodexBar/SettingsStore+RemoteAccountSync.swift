@@ -40,8 +40,20 @@ extension SettingsStore {
     }
 
     func synchronizeRemoteAccount(_ selection: RemoteAccountSyncSelection) async -> [RemoteAccountSyncHostResult] {
+        await self.synchronizeRemoteAccount(selection, hosts: nil)
+    }
+
+    func synchronizeRemoteAccount(
+        _ selection: RemoteAccountSyncSelection,
+        hosts requestedHosts: [String]?) async -> [RemoteAccountSyncHostResult]
+    {
         guard self.remoteAccountSyncEnabled else { return [] }
-        let hosts = self.remoteAccountSyncHostList
+        let configuredHosts = self.remoteAccountSyncHostList
+        let hosts = if let requestedHosts {
+            requestedHosts.filter { configuredHosts.contains($0) }
+        } else {
+            configuredHosts
+        }
         guard !hosts.isEmpty else { return [] }
         let request = RemoteAccountSyncRequest(
             provider: self.remoteProvider(for: selection),

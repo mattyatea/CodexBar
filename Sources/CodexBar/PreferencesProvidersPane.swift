@@ -2,6 +2,11 @@ import AppKit
 import CodexBarCore
 import SwiftUI
 
+private struct RemoteAccountSyncRetryState: Equatable {
+    let selection: RemoteAccountSyncSelection
+    let hosts: [String]
+}
+
 @MainActor
 enum ProviderSettingsRefreshInteraction {
     static func perform(operation: () async -> Void) async {
@@ -27,6 +32,8 @@ struct ProvidersPane: View {
     @State private var settingsLastAppActiveRunAtByID: [String: Date] = [:]
     @State private var activeConfirmation: ProviderSettingsConfirmationState?
     @State private var codexAccountsNotice: CodexAccountsSectionNotice?
+    @State private var remoteAccountSyncRetry: RemoteAccountSyncRetryState?
+    @State private var isRetryingRemoteAccountSync = false
     @State private var isAuthenticatingLiveCodexAccount = false
 
     init(
@@ -103,6 +110,11 @@ struct ProvidersPane: View {
                         addAccount: {
                             Task { @MainActor in
                                 await self.addManagedCodexAccount()
+                            }
+                        },
+                        retryRemoteAccountSync: {
+                            Task { @MainActor in
+                                await self.retryCodexRemoteAccountSync()
                             }
                         })
                 }
@@ -251,17 +263,19 @@ struct ProvidersPane: View {
             isRemovingManagedAccount: self.managedCodexAccountCoordinator.isRemovingManagedAccount,
             isAuthenticatingLiveAccount: self.isAuthenticatingLiveCodexAccount,
             isPromotingSystemAccount: self.codexAccountPromotionCoordinator.isPromotingSystemAccount,
-            notice: self.codexAccountsNotice ?? degradedNotice)
+            notice: self.codexAccountsNotice ?? degradedNotice,
+            canRetryRemoteAccountSync: self.remoteAccountSyncRetry != nil,
+            isRetryingRemoteAccountSync: self.isRetryingRemoteAccountSync)
     }
 
     func selectCodexVisibleAccount(id: String) async {
-        self.codexAccountsNotice = nil
+        self.clearRemoteAccountSyncNotice()
         guard self.settings.selectCodexVisibleAccount(id: id) else { return }
         await self.refreshCodexProvider()
     }
 
     func requestCodexSystemVisibleAccount(id: String) async {
-        self.codexAccountsNotice = nil
+        self.clearRemoteAccountSyncNotice()
         guard let account = self.settings.codexVisibleAccountProjection.visibleAccounts.first(where: { $0.id == id }),
               let managedAccountID = account.storedAccountID
         else {
@@ -279,24 +293,31 @@ struct ProvidersPane: View {
         else {
             return
         }
-        let syncResults = await self.settings.synchronizeRemoteAccount(
-            .codex(email: account.email, workspaceAccountID: account.effectiveWorkspaceAccountID))
-        let failedHosts = syncResults.compactMap { result -> String? in
-            guard !result.succeeded else { return nil }
-            guard let errorDescription = result.errorDescription, !errorDescription.isEmpty else {
-                return result.host
-            }
-            return "\(result.host) — \(errorDescription)"
+        let selection = RemoteAccountSyncSelection.codex(
+            email: account.email,
+            workspaceAccountID: account.effectiveWorkspaceAccountID)
+        let syncResults = await self.settings.synchronizeRemoteAccount(selection)
+        self.applyRemoteAccountSyncResults(syncResults, selection: selection)
+    }
+
+    func retryCodexRemoteAccountSync() async {
+        guard !self.isRetryingRemoteAccountSync,
+              let retry = self.remoteAccountSyncRetry
+        else { return }
+        guard self.settings.remoteAccountSyncEnabled else {
+            self.clearRemoteAccountSyncNotice()
+            return
         }
-        if !failedHosts.isEmpty {
-            self.codexAccountsNotice = CodexAccountsSectionNotice(
-                text: String(format: L("Remote account sync failed on: %@"), failedHosts.joined(separator: ", ")),
-                tone: .warning)
-        }
+
+        self.isRetryingRemoteAccountSync = true
+        defer { self.isRetryingRemoteAccountSync = false }
+
+        let syncResults = await self.settings.synchronizeRemoteAccount(retry.selection, hosts: retry.hosts)
+        self.applyRemoteAccountSyncResults(syncResults, selection: retry.selection)
     }
 
     func addManagedCodexAccount() async {
-        self.codexAccountsNotice = nil
+        self.clearRemoteAccountSyncNotice()
         guard let state = self.codexAccountsSectionState(for: .codex), state.canAddAccount else {
             return
         }
@@ -311,7 +332,7 @@ struct ProvidersPane: View {
     }
 
     func reauthenticateCodexAccount(_ account: CodexVisibleAccount) async {
-        self.codexAccountsNotice = nil
+        self.clearRemoteAccountSyncNotice()
         self.settings.invalidateCodexAccountReconciliationSnapshotCache()
         guard let state = self.codexAccountsSectionState(for: .codex),
               let current = state.visibleAccounts.first(where: { $0.id == account.id }),
@@ -350,7 +371,7 @@ struct ProvidersPane: View {
     }
 
     func removeManagedCodexAccount(id: UUID) async {
-        self.codexAccountsNotice = nil
+        self.clearRemoteAccountSyncNotice()
         do {
             try await self.managedCodexAccountCoordinator.removeManagedAccount(id: id)
             await self.refreshCodexProvider()
@@ -580,6 +601,36 @@ struct ProvidersPane: View {
 
         return CodexAccountsSectionNotice(
             text: error.localizedDescription,
+            tone: .warning)
+    }
+
+    private func clearRemoteAccountSyncNotice() {
+        self.codexAccountsNotice = nil
+        self.remoteAccountSyncRetry = nil
+    }
+
+    private func applyRemoteAccountSyncResults(
+        _ results: [RemoteAccountSyncHostResult],
+        selection: RemoteAccountSyncSelection)
+    {
+        let failedResults = results.filter { !$0.succeeded }
+        guard !failedResults.isEmpty else {
+            self.remoteAccountSyncRetry = nil
+            self.codexAccountsNotice = nil
+            return
+        }
+
+        self.remoteAccountSyncRetry = RemoteAccountSyncRetryState(
+            selection: selection,
+            hosts: failedResults.map(\.host))
+        let failedHosts = failedResults.map { result -> String in
+            guard let errorDescription = result.errorDescription, !errorDescription.isEmpty else {
+                return result.host
+            }
+            return "\(result.host) — \(errorDescription)"
+        }
+        self.codexAccountsNotice = CodexAccountsSectionNotice(
+            text: String(format: L("Remote account sync failed on: %@"), failedHosts.joined(separator: ", ")),
             tone: .warning)
     }
 
