@@ -33,6 +33,7 @@ struct ProvidersPane: View {
     @State private var activeConfirmation: ProviderSettingsConfirmationState?
     @State private var codexAccountsNotice: CodexAccountsSectionNotice?
     @State private var remoteAccountSyncRetry: RemoteAccountSyncRetryState?
+    @State private var canOpenOnePasswordForRemoteAccountSync = false
     @State private var isRetryingRemoteAccountSync = false
     @State private var isAuthenticatingLiveCodexAccount = false
 
@@ -116,6 +117,9 @@ struct ProvidersPane: View {
                             Task { @MainActor in
                                 await self.retryCodexRemoteAccountSync()
                             }
+                        },
+                        openOnePassword: {
+                            self.openOnePassword()
                         })
                 }
             })
@@ -265,6 +269,7 @@ struct ProvidersPane: View {
             isPromotingSystemAccount: self.codexAccountPromotionCoordinator.isPromotingSystemAccount,
             notice: self.codexAccountsNotice ?? degradedNotice,
             canRetryRemoteAccountSync: self.remoteAccountSyncRetry != nil,
+            canOpenOnePasswordForRemoteAccountSync: self.canOpenOnePasswordForRemoteAccountSync,
             isRetryingRemoteAccountSync: self.isRetryingRemoteAccountSync)
     }
 
@@ -607,6 +612,7 @@ struct ProvidersPane: View {
     private func clearRemoteAccountSyncNotice() {
         self.codexAccountsNotice = nil
         self.remoteAccountSyncRetry = nil
+        self.canOpenOnePasswordForRemoteAccountSync = false
     }
 
     private func applyRemoteAccountSyncResults(
@@ -617,9 +623,13 @@ struct ProvidersPane: View {
         guard !failedResults.isEmpty else {
             self.remoteAccountSyncRetry = nil
             self.codexAccountsNotice = nil
+            self.canOpenOnePasswordForRemoteAccountSync = false
             return
         }
 
+        self.canOpenOnePasswordForRemoteAccountSync = failedResults.contains {
+            RemoteAccountSSHAgentDiagnostics.shouldOfferAuthorizationHelp(for: $0.errorDescription)
+        }
         self.remoteAccountSyncRetry = RemoteAccountSyncRetryState(
             selection: selection,
             hosts: failedResults.map(\.host))
@@ -629,9 +639,24 @@ struct ProvidersPane: View {
             }
             return "\(result.host) — \(errorDescription)"
         }
+        let failureText = String(
+            format: L("Remote account sync failed on: %@"),
+            failedHosts.joined(separator: ", "))
+        let noticeText = self.canOpenOnePasswordForRemoteAccountSync
+            ? "\(failureText)\n\(L("remote_account_sync_1password_authorization_help"))"
+            : failureText
         self.codexAccountsNotice = CodexAccountsSectionNotice(
-            text: String(format: L("Remote account sync failed on: %@"), failedHosts.joined(separator: ", ")),
+            text: noticeText,
             tone: .warning)
+    }
+
+    private func openOnePassword() {
+        guard let applicationURL = NSWorkspace.shared
+            .urlForApplication(withBundleIdentifier: "com.1password.1password")
+        else {
+            return
+        }
+        NSWorkspace.shared.open(applicationURL)
     }
 
     private func presentLoginAlert(title: String, message: String) {

@@ -157,6 +157,19 @@ public struct RemoteAccountConnectivityResult: Equatable, Sendable, Identifiable
     }
 }
 
+/// Helps the UI point users to an SSH agent approval when public-key auth fails.
+/// OpenSSH may only report the final `Permission denied (publickey)` line, so this
+/// is intentionally phrased as a possible 1Password recovery path, not a diagnosis.
+public enum RemoteAccountSSHAgentDiagnostics {
+    public static func shouldOfferAuthorizationHelp(for errorDescription: String?) -> Bool {
+        guard let errorDescription else { return false }
+        let message = errorDescription.lowercased()
+        return message.contains("permission denied (publickey)") ||
+            (message.contains("agent") &&
+                (message.contains("signing failed") || message.contains("communication with agent failed")))
+    }
+}
+
 public enum RemoteAccountSyncError: LocalizedError, Equatable, Sendable {
     case invalidHost
     case invalidRequest

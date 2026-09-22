@@ -33,6 +33,7 @@ struct CodexAccountsSectionState: Equatable {
     let isPromotingSystemAccount: Bool
     let notice: CodexAccountsSectionNotice?
     let canRetryRemoteAccountSync: Bool
+    let canOpenOnePasswordForRemoteAccountSync: Bool
     let isRetryingRemoteAccountSync: Bool
 
     init(
@@ -47,6 +48,7 @@ struct CodexAccountsSectionState: Equatable {
         isPromotingSystemAccount: Bool,
         notice: CodexAccountsSectionNotice?,
         canRetryRemoteAccountSync: Bool = false,
+        canOpenOnePasswordForRemoteAccountSync: Bool = false,
         isRetryingRemoteAccountSync: Bool = false)
     {
         self.visibleAccounts = visibleAccounts
@@ -60,6 +62,7 @@ struct CodexAccountsSectionState: Equatable {
         self.isPromotingSystemAccount = isPromotingSystemAccount
         self.notice = notice
         self.canRetryRemoteAccountSync = canRetryRemoteAccountSync
+        self.canOpenOnePasswordForRemoteAccountSync = canOpenOnePasswordForRemoteAccountSync
         self.isRetryingRemoteAccountSync = isRetryingRemoteAccountSync
     }
 
@@ -154,6 +157,7 @@ struct CodexAccountsSectionView: View {
     let requestSystemVisibleAccount: (String) -> Void
     let addAccount: () -> Void
     let retryRemoteAccountSync: (() -> Void)?
+    let openOnePassword: (() -> Void)?
 
     init(
         state: CodexAccountsSectionState,
@@ -162,7 +166,8 @@ struct CodexAccountsSectionView: View {
         removeAccount: @escaping (CodexVisibleAccount) -> Void,
         requestSystemVisibleAccount: @escaping (String) -> Void,
         addAccount: @escaping () -> Void,
-        retryRemoteAccountSync: (() -> Void)? = nil)
+        retryRemoteAccountSync: (() -> Void)? = nil,
+        openOnePassword: (() -> Void)? = nil)
     {
         self.state = state
         self.setActiveVisibleAccount = setActiveVisibleAccount
@@ -171,6 +176,7 @@ struct CodexAccountsSectionView: View {
         self.requestSystemVisibleAccount = requestSystemVisibleAccount
         self.addAccount = addAccount
         self.retryRemoteAccountSync = retryRemoteAccountSync
+        self.openOnePassword = openOnePassword
     }
 
     var body: some View {
@@ -242,26 +248,40 @@ struct CodexAccountsSectionView: View {
             }
 
             if let notice = self.state.notice {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(notice.text)
                         .font(.footnote)
                         .foregroundStyle(notice.tone == .warning ? .red : .secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if self.state.canRetryRemoteAccountSync {
-                        Button {
-                            self.retryRemoteAccountSync?()
-                        } label: {
-                            if self.state.isRetryingRemoteAccountSync {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Label(L("codex_workspaces_retry"), systemImage: "arrow.clockwise")
+                    if self.state.canOpenOnePasswordForRemoteAccountSync || self.state.canRetryRemoteAccountSync {
+                        HStack(spacing: 10) {
+                            if self.state.canOpenOnePasswordForRemoteAccountSync {
+                                Button {
+                                    self.openOnePassword?()
+                                } label: {
+                                    Label(L("remote_account_sync_open_1password"), systemImage: "lock.open")
+                                }
+                                .buttonStyle(.borderless)
+                                .controlSize(.small)
+                            }
+
+                            if self.state.canRetryRemoteAccountSync {
+                                Button {
+                                    self.retryRemoteAccountSync?()
+                                } label: {
+                                    if self.state.isRetryingRemoteAccountSync {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Label(L("codex_workspaces_retry"), systemImage: "arrow.clockwise")
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                                .controlSize(.small)
+                                .disabled(self.state.isRetryingRemoteAccountSync)
                             }
                         }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .disabled(self.state.isRetryingRemoteAccountSync)
                     }
                 }
             }

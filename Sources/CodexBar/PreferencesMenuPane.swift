@@ -1,3 +1,4 @@
+import AppKit
 import CodexBarCore
 import SwiftUI
 
@@ -304,6 +305,20 @@ struct RemoteAccountSyncSettingsSection: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .help(errorDescription)
+
+                    if RemoteAccountSSHAgentDiagnostics.shouldOfferAuthorizationHelp(for: errorDescription) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L("remote_account_sync_1password_authorization_help"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button(L("remote_account_sync_open_1password")) {
+                                self.openOnePassword()
+                            }
+                            .buttonStyle(.link)
+                            .font(.caption2)
+                        }
+                    }
                 }
             }
         }
@@ -343,6 +358,15 @@ struct RemoteAccountSyncSettingsSection: View {
             }
             self.testingHosts.subtract(hosts)
         }
+    }
+
+    private func openOnePassword() {
+        guard let applicationURL = NSWorkspace.shared
+            .urlForApplication(withBundleIdentifier: "com.1password.1password")
+        else {
+            return
+        }
+        NSWorkspace.shared.open(applicationURL)
     }
 
     private func reloadSSHConfig() {

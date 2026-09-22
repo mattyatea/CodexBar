@@ -1640,6 +1640,8 @@
 "remote_account_sync_test_help" = "アカウントを変更せずに、SSH接続と一時的なリモート同期ヘルパーを確認します。";
 "remote_account_sync_test_succeeded" = "接続済み";
 "remote_account_sync_test_failed" = "接続に失敗";
+"remote_account_sync_1password_authorization_help" = "1Password SSH Agent を使っている場合は、1Password を起動してロックを解除し、SSH鍵の利用リクエストを承認してください。確認画面が見つからない場合は、メニューバーの1Passwordアイコンから「SSH request waiting」を開いてから再試行してください。";
+"remote_account_sync_open_1password" = "1Passwordを開く";
 "remote_account_sync_footer" = "送信するのはアカウント選択だけです。リモートにCodexBarをインストールせず、一時ヘルパーを各操作後に削除します。SSH は ~/.ssh/config の Host、IdentityAgent、IdentityFile、ProxyCommand をそのまま使い、資格情報は各ホストに残ります。";
 "Remote account sync failed" = "リモートアカウント同期に失敗しました";
 "Remote account sync failed on: %@" = "リモートアカウント同期に失敗したホスト: %@";
